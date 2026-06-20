@@ -1,0 +1,795 @@
+{% extends "base.html" %}
+{% block title %}品牌健康度评分{% endblock %}
+{% block content %}
+
+<div id="healthAlerts" class="health-alerts" style="display:none;"></div>
+
+<div class="health-page-header">
+    <div>
+        <h2><span class="health-header-icon">🩺</span> 品牌健康度评分</h2>
+        <p>从六大维度综合评估新能源汽车品牌市场竞争力</p>
+    </div>
+    <div class="health-header-actions">
+        <button id="btnCompareMode" class="btn btn-outline" onclick="toggleCompareMode()">
+            <span class="action-icon">⚖️</span> 对比模式
+        </button>
+        {% if current_user.role == 'admin' %}
+        <button id="btnWeightPanel" class="btn btn-outline" onclick="toggleWeightPanel()">
+            <span class="action-icon">⚙️</span> 权重设置
+        </button>
+        {% endif %}
+    </div>
+</div>
+
+<div id="weightPanel" class="weight-panel" style="display:none;">
+    <div class="weight-panel-header">
+        <h4><span>⚙️</span> 评分维度权重设置（仅管理员）</h4>
+        <button class="panel-close" onclick="toggleWeightPanel()">&times;</button>
+    </div>
+    <div class="weight-panel-body" id="weightInputs"></div>
+    <div class="weight-panel-footer">
+        <div class="weight-total-display">权重合计：<span id="weightTotal">100</span>%</div>
+        <div style="display:flex; gap:10px;">
+            <button class="btn" style="background:#334155;" onclick="resetWeights()">重置默认</button>
+            <button class="btn btn-save" onclick="saveWeights()">保存权重</button>
+        </div>
+    </div>
+</div>
+
+<div class="health-controls">
+    <div class="hc-group">
+        <label class="hc-label">时间窗口</label>
+        <div class="hc-seg" id="timeWindowSeg">
+            <button class="hc-seg-btn active" data-value="1q" onclick="setTimeWindow('1q')">近一季</button>
+            <button class="hc-seg-btn" data-value="6m" onclick="setTimeWindow('6m')">近半年</button>
+            <button class="hc-seg-btn" data-value="1y" onclick="setTimeWindow('1y')">近一年</button>
+        </div>
+    </div>
+    <div class="hc-group">
+        <label class="hc-label">分组榜单</label>
+        <div class="hc-seg" id="categorySeg">
+            <button class="hc-seg-btn active" data-value="all" onclick="setCategory('all')">全市场</button>
+            <button class="hc-seg-btn" data-value="bev" onclick="setCategory('bev')">纯电阵营</button>
+            <button class="hc-seg-btn" data-value="phev" onclick="setCategory('phev')">混动阵营</button>
+        </div>
+    </div>
+</div>
+
+<div id="trackingSection" class="tracking-section" style="display:none;">
+    <div class="tracking-header">
+        <h4><span>⭐</span> 跟踪清单</h4>
+        <span class="tracking-hint">分数波动超阈值将在顶部提醒</span>
+    </div>
+    <div id="trackingList" class="tracking-list"></div>
+</div>
+
+<div id="compareBar" class="compare-bar" style="display:none;">
+    <div class="compare-bar-inner">
+        <span class="compare-bar-label">对比模式：</span>
+        <div id="compareSlotA" class="compare-slot-mini" onclick="clearCompareSlot('A')">
+            <span class="csm-placeholder">选择品牌 A</span>
+        </div>
+        <span class="compare-bar-vs">VS</span>
+        <div id="compareSlotB" class="compare-slot-mini" onclick="clearCompareSlot('B')">
+            <span class="csm-placeholder">选择品牌 B</span>
+        </div>
+        <button class="btn" onclick="showCompareResult()" id="btnCompareGo" disabled>查看对比</button>
+        <button class="btn" style="background:#334155;" onclick="exitCompareMode()">退出对比</button>
+    </div>
+</div>
+
+<div id="brandGrid" class="brand-grid"></div>
+
+<div class="health-footer">
+    <div class="hf-section">
+        <h5>📊 评分维度说明</h5>
+        <ul id="dimensionLegend"></ul>
+    </div>
+    <div class="hf-section">
+        <h5>⚖️ 当前权重配置</h5>
+        <div id="weightDisplay" class="weight-display"></div>
+    </div>
+    <div class="hf-section">
+        <h5>📁 数据来源</h5>
+        <p>销量数据来源于各区域上牌量统计，续航/电耗来自车型参数，充电桩密度来自国家能源局公开数据，评分口径为季度更新。</p>
+    </div>
+</div>
+
+<div id="detailOverlay" class="detail-overlay" style="display:none;">
+    <div class="detail-panel">
+        <div class="detail-header">
+            <div class="detail-title">
+                <div class="detail-brand-badge" id="detailBadge"></div>
+                <div>
+                    <div class="detail-brand-name" id="detailBrandName"></div>
+                    <div class="detail-brand-meta" id="detailBrandMeta"></div>
+                </div>
+            </div>
+            <div class="detail-actions">
+                <button id="detailTrackBtn" class="btn btn-outline" onclick="toggleTrackFromDetail()">
+                    <span>⭐</span> <span id="detailTrackText">加入跟踪</span>
+                </button>
+                <button class="btn" onclick="goToDashboard()">
+                    <span>📊</span> 看板查看
+                </button>
+                <button class="panel-close" onclick="closeDetail()">&times;</button>
+            </div>
+        </div>
+        <div class="detail-body">
+            <div class="detail-top">
+                <div class="detail-score-block">
+                    <div class="detail-score-label">综合健康分</div>
+                    <div class="detail-score-value" id="detailTotalScore">--</div>
+                    <div class="detail-score-change" id="detailScoreChange"></div>
+                    <div class="detail-rank-info" id="detailRankInfo"></div>
+                </div>
+                <div class="detail-radar-wrap">
+                    <div id="detailRadar" class="detail-radar"></div>
+                </div>
+                <div class="detail-trend-wrap">
+                    <div class="section-title">分数走势</div>
+                    <div id="detailTrend" class="detail-trend"></div>
+                </div>
+            </div>
+            <div class="detail-dim-list" id="detailDimList"></div>
+            <div class="detail-suggestion">
+                <div class="section-title">💡 改进建议</div>
+                <div class="suggestion-content" id="detailSuggestion"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="compareOverlay" class="detail-overlay" style="display:none;">
+    <div class="detail-panel compare-panel">
+        <div class="detail-header">
+            <div class="detail-title">
+                <h3 style="margin:0;">⚖️ 品牌对比</h3>
+            </div>
+            <button class="panel-close" onclick="closeCompare()">&times;</button>
+        </div>
+        <div class="detail-body">
+            <div class="compare-result-grid">
+                <div class="compare-result-side" id="compareSideA"></div>
+                <div class="compare-result-radar">
+                    <div id="compareRadar" class="compare-radar-chart"></div>
+                </div>
+                <div class="compare-result-side" id="compareSideB"></div>
+            </div>
+            <div class="compare-diff-table" id="compareDiffTable"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+var currentTimeWindow = '1y';
+var currentCategory = 'all';
+var currentData = null;
+var compareMode = false;
+var compareBrandA = null;
+var compareBrandB = null;
+var currentDetailBrand = null;
+var miniRadarCharts = {};
+var miniTrendCharts = {};
+
+function init() {
+    loadData();
+}
+
+async function loadData() {
+    var res = await fetch('/api/brand_health/data?time_window=' + currentTimeWindow + '&category=' + currentCategory);
+    currentData = await res.json();
+    renderDimensionLegend();
+    renderWeightDisplay();
+    renderAlerts(currentData.alerts || []);
+    renderTracking(currentData.tracked_brands || []);
+    renderBrands(currentData.brands || []);
+    if (currentData.is_admin) {
+        initWeightInputs(currentData.weights || {});
+    }
+}
+
+function setTimeWindow(val) {
+    currentTimeWindow = val;
+    document.querySelectorAll('#timeWindowSeg .hc-seg-btn').forEach(function(b){ b.classList.toggle('active', b.dataset.value === val); });
+    loadData();
+}
+
+function setCategory(val) {
+    currentCategory = val;
+    document.querySelectorAll('#categorySeg .hc-seg-btn').forEach(function(b){ b.classList.toggle('active', b.dataset.value === val); });
+    loadData();
+}
+
+function renderDimensionLegend() {
+    var dims = currentData.dimensions_meta || [];
+    var el = document.getElementById('dimensionLegend');
+    el.innerHTML = dims.map(function(d){
+        return '<li><span class="dim-icon">' + d.icon + '</span><span class="dim-name">' + d.name + '</span><span class="dim-desc">' + d.desc + '</span></li>';
+    }).join('');
+}
+
+function renderWeightDisplay() {
+    var w = currentData.weights || {};
+    var dims = currentData.dimensions_meta || [];
+    var el = document.getElementById('weightDisplay');
+    el.innerHTML = dims.map(function(d){
+        return '<div class="weight-item"><span>' + d.icon + ' ' + d.name + '</span><span class="weight-val">' + (w[d.key] || 0) + '%</span></div>';
+    }).join('');
+}
+
+function renderAlerts(alerts) {
+    var el = document.getElementById('healthAlerts');
+    if (!alerts || alerts.length === 0) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.innerHTML = '<div class="health-alerts-inner">' + alerts.map(function(a){
+        var up = a.change > 0;
+        var cls = up ? 'alert-up' : 'alert-down';
+        return '<div class="health-alert ' + cls + '"><span class="alert-brand">' + a.brand + '</span>' +
+            '<span>健康分 <b>' + a.score + '</b>，较上期' + (up ? '上涨' : '下跌') + ' <b>' + Math.abs(a.change) + '</b> 分（阈值 ±' + a.threshold + '）</span></div>';
+    }).join('') + '</div>';
+}
+
+function renderTracking(tracked) {
+    var sec = document.getElementById('trackingSection');
+    if (!tracked || tracked.length === 0) { sec.style.display = 'none'; return; }
+    sec.style.display = 'block';
+    var brands = currentData.brands || [];
+    var trackedBrands = brands.filter(function(b){ return tracked.indexOf(b.brand) >= 0; });
+    var list = document.getElementById('trackingList');
+    list.innerHTML = trackedBrands.map(function(b){
+        return renderMiniBrandCard(b, true);
+    }).join('');
+    trackedBrands.forEach(function(b){ initBrandCharts(b.brand + '_track'); });
+}
+
+function renderBrands(brands) {
+    var tracked = currentData.tracked_brands || [];
+    var otherBrands = brands.filter(function(b){ return tracked.indexOf(b.brand) < 0; });
+    var el = document.getElementById('brandGrid');
+    el.innerHTML = otherBrands.map(function(b){ return renderMiniBrandCard(b, false); }).join('');
+    otherBrands.forEach(function(b){ initBrandCharts(b.brand); });
+}
+
+function renderMiniBrandCard(b, isTracked) {
+    var id = (isTracked ? b.brand + '_track' : b.brand);
+    var isUp = b.score_change > 0;
+    var isSame = b.score_change === 0;
+    var changeArrow = isUp ? '▲' : (isSame ? '—' : '▼');
+    var changeCls = isUp ? 'change-up' : (isSame ? 'change-same' : 'change-down');
+    var rankBadge = '';
+    if (b.rank === 1) rankBadge = '<span class="rank-gold">🥇</span>';
+    else if (b.rank === 2) rankBadge = '<span class="rank-silver">🥈</span>';
+    else if (b.rank === 3) rankBadge = '<span class="rank-bronze">🥉</span>';
+    else rankBadge = '<span class="rank-num">#' + b.rank + '</span>';
+
+    var cls = 'brand-card' + (compareMode ? ' compare-selectable' : '') + (isTracked ? ' tracked' : '') +
+        ((compareBrandA && compareBrandA.brand === b.brand) ? ' selected-a' : '') +
+        ((compareBrandB && compareBrandB.brand === b.brand) ? ' selected-b' : '');
+
+    return '<div class="' + cls + '" data-brand="' + b.brand + '" onclick="onCardClick(this, \'' + b.brand + '\')">' +
+        '<div class="bc-header">' +
+            '<div class="bc-brand">' +
+                '<div class="bc-badge">' + b.brand.charAt(0) + '</div>' +
+                '<div class="bc-brand-name">' + b.brand + '</div>' +
+            '</div>' +
+            rankBadge +
+        '</div>' +
+        '<div class="bc-score-row">' +
+            '<div class="bc-score">' + b.total_score + '</div>' +
+            '<div class="bc-change ' + changeCls + '">' + changeArrow + ' ' + Math.abs(b.score_change) + '</div>' +
+        '</div>' +
+        '<div class="bc-body">' +
+            '<div class="bc-radar" id="radar_' + id + '"></div>' +
+            '<div class="bc-trend" id="trend_' + id + '"></div>' +
+        '</div>' +
+    '</div>';
+}
+
+function initBrandCharts(id) {
+    if (!currentData) return;
+    var brand = currentData.brands.find(function(b){ return id === b.brand || id === b.brand + '_track'; });
+    if (!brand) return;
+    var cleanId = id.endsWith('_track') ? id.slice(0, -6) : id;
+    brand = currentData.brands.find(function(b){ return b.brand === cleanId; });
+    if (!brand) return;
+
+    var dims = currentData.dimensions_meta || [];
+    var radarEl = document.getElementById('radar_' + id);
+    if (radarEl && typeof echarts !== 'undefined' && radarEl.offsetParent !== null) {
+        var chart = echarts.init(radarEl);
+        chart.setOption({
+            radar: {
+                indicator: dims.map(function(d){ return { name: d.icon, max: 100 }; }),
+                center: ['50%', '55%'],
+                radius: '65%',
+                splitArea: { areaStyle: { color: ['rgba(56,189,248,0.02)', 'rgba(56,189,248,0.04)'] } },
+                axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+                splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
+                axisName: { color: 'rgba(255,255,255,0.6)', fontSize: 11 }
+            },
+            series: [{
+                type: 'radar',
+                data: [{ value: dims.map(function(d){ return brand.dimensions[d.key]; }),
+                    lineStyle: { color: '#38bdf8', width: 2 },
+                    areaStyle: { color: 'rgba(56,189,248,0.25)' },
+                    itemStyle: { color: '#38bdf8' }
+                }]
+            }]
+        });
+        miniRadarCharts[id] = chart;
+    }
+
+    var trendEl = document.getElementById('trend_' + id);
+    if (trendEl && typeof echarts !== 'undefined' && trendEl.offsetParent !== null) {
+        var qdata = brand.quarterly || [];
+        var chart2 = echarts.init(trendEl);
+        chart2.setOption({
+            grid: { top: 10, right: 4, bottom: 14, left: 4 },
+            xAxis: { type: 'category', data: qdata.map(function(q){ return q.period; }),
+                axisLine: { show: false }, axisTick: { show: false },
+                axisLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 9 } },
+            yAxis: { type: 'value', show: false, min: function(v){ return Math.floor(v.min / 10) * 10; } },
+            series: [{ type: 'line', smooth: true, symbol: 'circle', symbolSize: 4,
+                data: qdata.map(function(q){ return q.score; }),
+                lineStyle: { color: '#818cf8', width: 2 },
+                itemStyle: { color: '#818cf8' },
+                areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                    colorStops: [{ offset: 0, color: 'rgba(129,140,248,0.35)' }, { offset: 1, color: 'rgba(129,140,248,0.02)' }] } } }]
+        });
+        miniTrendCharts[id] = chart2;
+    }
+}
+
+function onCardClick(el, brandName) {
+    var brand = currentData.brands.find(function(b){ return b.brand === brandName; });
+    if (!brand) return;
+
+    if (compareMode) {
+        if (!compareBrandA) {
+            compareBrandA = brand;
+            document.querySelectorAll('.brand-card.selected-a').forEach(function(c){ c.classList.remove('selected-a'); });
+            el.classList.add('selected-a');
+            updateCompareSlots();
+        } else if (!compareBrandB && brand.brand !== compareBrandA.brand) {
+            compareBrandB = brand;
+            document.querySelectorAll('.brand-card.selected-b').forEach(function(c){ c.classList.remove('selected-b'); });
+            el.classList.add('selected-b');
+            updateCompareSlots();
+        } else if (brand.brand === compareBrandA.brand) {
+            compareBrandA = null;
+            el.classList.remove('selected-a');
+            updateCompareSlots();
+        } else if (brand.brand === compareBrandB.brand) {
+            compareBrandB = null;
+            el.classList.remove('selected-b');
+            updateCompareSlots();
+        }
+        return;
+    }
+
+    openDetail(brand);
+}
+
+function toggleCompareMode() {
+    compareMode = !compareMode;
+    var bar = document.getElementById('compareBar');
+    var btn = document.getElementById('btnCompareMode');
+    if (compareMode) {
+        bar.style.display = 'block';
+        btn.classList.add('active');
+        document.querySelectorAll('.brand-card').forEach(function(c){ c.classList.add('compare-selectable'); });
+    } else {
+        exitCompareMode();
+    }
+}
+
+function exitCompareMode() {
+    compareMode = false;
+    compareBrandA = null;
+    compareBrandB = null;
+    document.getElementById('compareBar').style.display = 'none';
+    document.getElementById('btnCompareMode').classList.remove('active');
+    document.querySelectorAll('.brand-card').forEach(function(c){ c.classList.remove('compare-selectable', 'selected-a', 'selected-b'); });
+    updateCompareSlots();
+    closeCompare();
+}
+
+function updateCompareSlots() {
+    var slotA = document.getElementById('compareSlotA');
+    var slotB = document.getElementById('compareSlotB');
+    var btnGo = document.getElementById('btnCompareGo');
+    if (compareBrandA) {
+        slotA.innerHTML = '<span class="csm-filled">' + compareBrandA.brand + '</span><span class="csm-close">×</span>';
+        slotA.classList.add('filled', 'slot-a');
+    } else {
+        slotA.innerHTML = '<span class="csm-placeholder">选择品牌 A</span>';
+        slotA.classList.remove('filled', 'slot-a');
+    }
+    if (compareBrandB) {
+        slotB.innerHTML = '<span class="csm-filled">' + compareBrandB.brand + '</span><span class="csm-close">×</span>';
+        slotB.classList.add('filled', 'slot-b');
+    } else {
+        slotB.innerHTML = '<span class="csm-placeholder">选择品牌 B</span>';
+        slotB.classList.remove('filled', 'slot-b');
+    }
+    btnGo.disabled = !(compareBrandA && compareBrandB);
+}
+
+function clearCompareSlot(which) {
+    if (which === 'A') {
+        compareBrandA = null;
+        document.querySelectorAll('.brand-card.selected-a').forEach(function(c){ c.classList.remove('selected-a'); });
+    } else {
+        compareBrandB = null;
+        document.querySelectorAll('.brand-card.selected-b').forEach(function(c){ c.classList.remove('selected-b'); });
+    }
+    updateCompareSlots();
+}
+
+async function showCompareResult() {
+    if (!compareBrandA || !compareBrandB) return;
+    var overlay = document.getElementById('compareOverlay');
+    overlay.style.display = 'flex';
+    renderCompareSide('A', compareBrandA);
+    renderCompareSide('B', compareBrandB);
+    setTimeout(function(){ renderCompareRadar(); }, 50);
+    renderCompareDiff();
+}
+
+function renderCompareSide(which, brand) {
+    var el = document.getElementById('compareSide' + which);
+    var cls = which === 'A' ? 'side-a' : 'side-b';
+    var isUp = brand.score_change > 0;
+    var arrow = isUp ? '▲' : (brand.score_change === 0 ? '—' : '▼');
+    var chgCls = isUp ? 'change-up' : (brand.score_change === 0 ? 'change-same' : 'change-down');
+    var dims = currentData.dimensions_meta || [];
+    el.className = 'compare-result-side ' + cls;
+    el.innerHTML = '<div class="cs-brand">' +
+        '<div class="cs-badge">' + brand.brand.charAt(0) + '</div>' +
+        '<div><div class="cs-name">' + brand.brand + '</div>' +
+        '<div class="cs-rank">#' + brand.rank + ' 名</div></div></div>' +
+        '<div class="cs-score-wrap">' +
+            '<div class="cs-score">' + brand.total_score + '</div>' +
+            '<div class="cs-change ' + chgCls + '">' + arrow + ' ' + Math.abs(brand.score_change) + '</div>' +
+        '</div>' +
+        '<div class="cs-dims">' +
+            dims.map(function(d){
+                return '<div class="cs-dim-row"><span>' + d.icon + ' ' + d.name + '</span>' +
+                    '<span class="cs-dim-val">' + brand.dimensions[d.key] + '</span></div>';
+            }).join('') +
+        '</div>';
+}
+
+function renderCompareRadar() {
+    var el = document.getElementById('compareRadar');
+    if (!el || typeof echarts === 'undefined') return;
+    var chart = echarts.init(el);
+    var dims = currentData.dimensions_meta || [];
+    chart.setOption({
+        legend: { data: [compareBrandA.brand, compareBrandB.brand], textStyle: { color: 'rgba(255,255,255,0.7)' }, bottom: 0 },
+        radar: {
+            indicator: dims.map(function(d){ return { name: d.name, max: 100 }; }),
+            center: ['50%', '48%'],
+            radius: '60%',
+            splitArea: { areaStyle: { color: ['rgba(255,255,255,0.02)', 'rgba(255,255,255,0.04)'] } },
+            axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
+            axisName: { color: 'rgba(255,255,255,0.6)', fontSize: 12 }
+        },
+        series: [{
+            type: 'radar',
+            data: [
+                { name: compareBrandA.brand, value: dims.map(function(d){ return compareBrandA.dimensions[d.key]; }),
+                    lineStyle: { color: '#38bdf8', width: 2 },
+                    areaStyle: { color: 'rgba(56,189,248,0.2)' }, itemStyle: { color: '#38bdf8' } },
+                { name: compareBrandB.brand, value: dims.map(function(d){ return compareBrandB.dimensions[d.key]; }),
+                    lineStyle: { color: '#f472b6', width: 2 },
+                    areaStyle: { color: 'rgba(244,114,182,0.2)' }, itemStyle: { color: '#f472b6' } }
+            ]
+        }]
+    });
+}
+
+function renderCompareDiff() {
+    var dims = currentData.dimensions_meta || [];
+    var rows = dims.map(function(d){
+        var va = compareBrandA.dimensions[d.key];
+        var vb = compareBrandB.dimensions[d.key];
+        var diff = round(va - vb, 1);
+        var winnerCls = diff > 0 ? 'winner-a' : (diff < 0 ? 'winner-b' : '');
+        return '<tr>' +
+            '<td>' + d.icon + ' ' + d.name + '</td>' +
+            '<td class="' + (diff > 0 ? 'winner' : '') + '">' + va + '</td>' +
+            '<td class="diff ' + winnerCls + '">' + (diff > 0 ? '+' : '') + diff + '</td>' +
+            '<td class="' + (diff < 0 ? 'winner' : '') + '">' + vb + '</td>' +
+        '</tr>';
+    }).join('');
+
+    var totalDiff = round(compareBrandA.total_score - compareBrandB.total_score, 1);
+    document.getElementById('compareDiffTable').innerHTML =
+        '<table class="diff-table"><thead><tr><th>维度</th><th>' + compareBrandA.brand + '</th><th>差值</th><th>' + compareBrandB.brand + '</th></tr></thead>' +
+        '<tbody>' + rows +
+        '<tr class="total-row"><td>综合健康分</td>' +
+        '<td class="' + (totalDiff > 0 ? 'winner' : '') + '"><b>' + compareBrandA.total_score + '</b></td>' +
+        '<td class="diff ' + (totalDiff > 0 ? 'winner-a' : (totalDiff < 0 ? 'winner-b' : '')) + '"><b>' + (totalDiff > 0 ? '+' : '') + totalDiff + '</b></td>' +
+        '<td class="' + (totalDiff < 0 ? 'winner' : '') + '"><b>' + compareBrandB.total_score + '</b></td></tr>' +
+        '</tbody></table>';
+}
+
+function closeCompare() {
+    document.getElementById('compareOverlay').style.display = 'none';
+}
+
+function openDetail(brand) {
+    currentDetailBrand = brand;
+    var tracked = currentData.tracked_brands || [];
+    var isTracked = tracked.indexOf(brand.brand) >= 0;
+
+    document.getElementById('detailBadge').textContent = brand.brand.charAt(0);
+    document.getElementById('detailBrandName').textContent = brand.brand;
+    document.getElementById('detailBrandMeta').textContent =
+        '覆盖' + (brand.raw_metrics.model_count || 0) + '款车型 · ' + (brand.raw_metrics.categories || []).join('/') + ' · 均价' + (brand.raw_metrics.avg_price || 0) + '万';
+    document.getElementById('detailTotalScore').textContent = brand.total_score;
+
+    var isUp = brand.score_change > 0;
+    var arrow = isUp ? '▲' : (brand.score_change === 0 ? '—' : '▼');
+    var chgCls = isUp ? 'change-up' : (brand.score_change === 0 ? 'change-same' : 'change-down');
+    var chgText = (isUp ? '+' : '') + brand.score_change + ' 分 vs 上期';
+    document.getElementById('detailScoreChange').className = 'detail-score-change ' + chgCls;
+    document.getElementById('detailScoreChange').textContent = arrow + ' ' + chgText;
+
+    var rankUp = brand.rank_change > 0;
+    var rankArrow = rankUp ? '▲' : (brand.rank_change === 0 ? '—' : '▼');
+    document.getElementById('detailRankInfo').innerHTML =
+        '总排名 <b>#' + brand.rank + '</b> <span class="' + (rankUp ? 'change-up' : (brand.rank_change === 0 ? 'change-same' : 'change-down')) + '">' +
+        rankArrow + ' ' + Math.abs(brand.rank_change) + ' 位</span>';
+
+    document.getElementById('detailTrackText').textContent = isTracked ? '取消跟踪' : '加入跟踪';
+
+    document.getElementById('detailSuggestion').textContent = brand.suggestion || '';
+
+    renderDetailDims(brand);
+    document.getElementById('detailOverlay').style.display = 'flex';
+
+    setTimeout(function(){
+        renderDetailRadar(brand);
+        renderDetailTrend(brand);
+    }, 50);
+}
+
+function renderDetailDims(brand) {
+    var dims = currentData.dimensions_meta || [];
+    var industryAvg = {};
+    dims.forEach(function(d){
+        var vals = currentData.brands.map(function(b){ return b.dimensions[d.key]; });
+        industryAvg[d.key] = round(vals.reduce(function(a, b){ return a + b; }, 0) / vals.length, 1);
+    });
+    var w = currentData.weights || {};
+
+    var el = document.getElementById('detailDimList');
+    el.innerHTML = '<div class="section-title" style="margin-top:24px;">📐 维度明细</div>' +
+        dims.map(function(d){
+            var v = brand.dimensions[d.key];
+            var avg = industryAvg[d.key];
+            var better = v >= avg;
+            var diff = round(v - avg, 1);
+            return '<div class="detail-dim-row">' +
+                '<div class="ddr-left">' +
+                    '<span class="ddr-icon">' + d.icon + '</span>' +
+                    '<div><div class="ddr-name">' + d.name + ' <span class="ddr-weight">(' + (w[d.key] || 0) + '%)</span></div>' +
+                    '<div class="ddr-desc">' + d.desc + '</div></div>' +
+                '</div>' +
+                '<div class="ddr-bar-wrap"><div class="ddr-bar" style="width:' + v + '%;"></div></div>' +
+                '<div class="ddr-right">' +
+                    '<div class="ddr-val">' + v + '</div>' +
+                    '<div class="ddr-avg">行业均 ' + avg +
+                        ' <span class="' + (better ? 'change-up' : 'change-down') + '">' + (better ? '▲' : '▼') + ' ' + Math.abs(diff) + '</span>' +
+                    '</div>' +
+                '</div></div>';
+        }).join('');
+}
+
+function renderDetailRadar(brand) {
+    var el = document.getElementById('detailRadar');
+    if (!el || typeof echarts === 'undefined') return;
+    var chart = echarts.init(el);
+    var dims = currentData.dimensions_meta || [];
+    var avgVals = [];
+    dims.forEach(function(d){
+        var vals = currentData.brands.map(function(b){ return b.dimensions[d.key]; });
+        avgVals.push(round(vals.reduce(function(a, b){ return a + b; }, 0) / vals.length, 1));
+    });
+    chart.setOption({
+        legend: { data: [brand.brand, '行业均值'], textStyle: { color: 'rgba(255,255,255,0.7)' }, bottom: 0 },
+        radar: {
+            indicator: dims.map(function(d){ return { name: d.name, max: 100 }; }),
+            center: ['50%', '50%'],
+            radius: '65%',
+            splitArea: { areaStyle: { color: ['rgba(56,189,248,0.02)', 'rgba(56,189,248,0.05)'] } },
+            axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
+            axisName: { color: 'rgba(255,255,255,0.7)', fontSize: 12 }
+        },
+        series: [{
+            type: 'radar',
+            data: [
+                { name: brand.brand, value: dims.map(function(d){ return brand.dimensions[d.key]; }),
+                    lineStyle: { color: '#38bdf8', width: 2 },
+                    areaStyle: { color: 'rgba(56,189,248,0.25)' }, itemStyle: { color: '#38bdf8' } },
+                { name: '行业均值', value: avgVals,
+                    lineStyle: { color: 'rgba(148,163,184,0.6)', width: 2, type: 'dashed' },
+                    areaStyle: { color: 'rgba(148,163,184,0.08)' }, itemStyle: { color: '#94a3b8' } }
+            ]
+        }]
+    });
+}
+
+function renderDetailTrend(brand) {
+    var el = document.getElementById('detailTrend');
+    if (!el || typeof echarts === 'undefined') return;
+    var chart = echarts.init(el);
+    var qdata = brand.quarterly || [];
+    chart.setOption({
+        grid: { top: 20, right: 10, bottom: 28, left: 35 },
+        xAxis: { type: 'category', data: qdata.map(function(q){ return q.period; }),
+            axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+            axisLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 11 } },
+        yAxis: { type: 'value',
+            axisLine: { show: false }, axisTick: { show: false },
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+            axisLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 11 } },
+        series: [{ type: 'line', smooth: true, symbol: 'circle', symbolSize: 7,
+            data: qdata.map(function(q){ return q.score; }),
+            lineStyle: { color: '#38bdf8', width: 3 },
+            itemStyle: { color: '#38bdf8', borderColor: '#0f172a', borderWidth: 2 },
+            label: { show: true, position: 'top', color: 'rgba(255,255,255,0.7)', fontSize: 11, formatter: '{c}' },
+            areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                colorStops: [{ offset: 0, color: 'rgba(56,189,248,0.35)' }, { offset: 1, color: 'rgba(56,189,248,0.02)' }] } } }]
+    });
+}
+
+function closeDetail() {
+    document.getElementById('detailOverlay').style.display = 'none';
+    currentDetailBrand = null;
+}
+
+function goToDashboard() {
+    if (!currentDetailBrand) return;
+    window.location.href = '/?brand=' + encodeURIComponent(currentDetailBrand.brand);
+}
+
+async function toggleTrackFromDetail() {
+    if (!currentDetailBrand) return;
+    var tracked = currentData.tracked_brands || [];
+    var isTracked = tracked.indexOf(currentDetailBrand.brand) >= 0;
+    var method = isTracked ? 'DELETE' : 'POST';
+    var res = await fetch('/api/brand_health/tracking', {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brand: currentDetailBrand.brand, threshold: 5 })
+    });
+    var data = await res.json();
+    if (data.status) {
+        showToast(isTracked ? '已取消跟踪' : '已加入跟踪清单', 'success');
+        loadData();
+    }
+}
+
+async function toggleTrackFromList(brandName, e) {
+    if (e) e.stopPropagation();
+    var res = await fetch('/api/brand_health/tracking', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brand: brandName })
+    });
+    var data = await res.json();
+    if (data.status) {
+        showToast('已取消跟踪', 'success');
+        loadData();
+    }
+}
+
+function toggleWeightPanel() {
+    var p = document.getElementById('weightPanel');
+    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function initWeightInputs(weights) {
+    var dims = currentData.dimensions_meta || [];
+    var el = document.getElementById('weightInputs');
+    el.innerHTML = dims.map(function(d){
+        return '<div class="weight-input-row">' +
+            '<label><span class="wi-icon">' + d.icon + '</span>' + d.name + '</label>' +
+            '<div class="wi-control">' +
+                '<input type="range" min="0" max="100" value="' + (weights[d.key] || 0) + '" data-key="' + d.key + '" oninput="onWeightInput(this)">' +
+                '<input type="number" min="0" max="100" value="' + (weights[d.key] || 0) + '" data-key="' + d.key + '" oninput="onWeightNumber(this)">' +
+                '<span class="wi-pct">%</span>' +
+            '</div></div>';
+    }).join('');
+    updateWeightTotal();
+}
+
+function onWeightInput(el) {
+    var key = el.dataset.key;
+    var numEl = document.querySelector('.weight-input-row input[type=number][data-key="' + key + '"]');
+    if (numEl) numEl.value = el.value;
+    updateWeightTotal();
+}
+
+function onWeightNumber(el) {
+    var key = el.dataset.key;
+    var rangeEl = document.querySelector('.weight-input-row input[type=range][data-key="' + key + '"]');
+    if (rangeEl) rangeEl.value = el.value;
+    updateWeightTotal();
+}
+
+function updateWeightTotal() {
+    var inputs = document.querySelectorAll('#weightInputs input[type=number]');
+    var total = 0;
+    inputs.forEach(function(i){ total += parseFloat(i.value || 0); });
+    document.getElementById('weightTotal').textContent = round(total, 1);
+}
+
+function resetWeights() {
+    var def = { sales_momentum: 20, avg_range: 15, price_competitiveness: 20, product_richness: 15, region_penetration: 15, charging_compatibility: 15 };
+    for (var k in def) {
+        var rangeEl = document.querySelector('#weightInputs input[type=range][data-key="' + k + '"]');
+        var numEl = document.querySelector('#weightInputs input[type=number][data-key="' + k + '"]');
+        if (rangeEl) rangeEl.value = def[k];
+        if (numEl) numEl.value = def[k];
+    }
+    updateWeightTotal();
+}
+
+async function saveWeights() {
+    var dims = currentData.dimensions_meta || [];
+    var payload = {};
+    dims.forEach(function(d){
+        var el = document.querySelector('#weightInputs input[type=number][data-key="' + d.key + '"]');
+        payload[d.key] = parseFloat(el ? el.value : 0);
+    });
+    var res = await fetch('/api/brand_health/weights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    var data = await res.json();
+    if (data.status === 'saved') {
+        showToast('权重已保存', 'success');
+        loadData();
+        toggleWeightPanel();
+    } else {
+        showToast(data.error || '保存失败', 'danger');
+    }
+}
+
+function showToast(msg, type) {
+    var c = document.getElementById('toastContainer');
+    if (!c) {
+        c = document.createElement('div');
+        c.id = 'toastContainer';
+        c.className = 'toast-container';
+        document.body.appendChild(c);
+    }
+    var t = document.createElement('div');
+    t.className = 'toast';
+    if (type === 'danger') t.style.borderLeftColor = '#f43f5e';
+    else if (type === 'success') t.style.borderLeftColor = '#10b981';
+    t.innerHTML = msg;
+    c.appendChild(t);
+    setTimeout(function(){ t.remove(); }, 3000);
+}
+
+function round(v, p) {
+    var f = Math.pow(10, p || 0);
+    return Math.round(v * f) / f;
+}
+
+window.addEventListener('load', init);
+window.addEventListener('resize', function(){
+    for (var k in miniRadarCharts) { try { miniRadarCharts[k].resize(); } catch(e){} }
+    for (var k in miniTrendCharts) { try { miniTrendCharts[k].resize(); } catch(e){} }
+});
+</script>
+{% endblock %}

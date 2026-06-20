@@ -2425,3 +2425,537 @@ def get_price_distribution():
             'most_count': max_count
         }
     })
+
+
+# ========== 品牌健康度评分模块 ==========
+
+def _get_dimensions_meta():
+    return [
+        {'key': 'sales_momentum', 'name': '销量增长势头', 'icon': '📈', 'desc': '基于品牌近季度销量同比/环比变化评估增长动力'},
+        {'key': 'avg_range', 'name': '平均续航水平', 'icon': '🔋', 'desc': '品牌在售车型平均续航里程表现'},
+        {'key': 'price_competitiveness', 'name': '同价位竞争力', 'icon': '💎', 'desc': '在相同价格带内品牌车型的配置/续航综合性价比'},
+        {'key': 'product_richness', 'name': '产品线丰富度', 'icon': '🛒', 'desc': '覆盖的价格带数量、车型矩阵完整度'},
+        {'key': 'region_penetration', 'name': '区域渗透广度', 'icon': '🗺️', 'desc': '全国区域销量分布的均匀度与覆盖省份数量'},
+        {'key': 'charging_compatibility', 'name': '补能适配度', 'icon': '⚡', 'desc': '纯电车型占比与充电桩密度的匹配程度'}
+    ]
+
+
+def _get_default_weights():
+    return {
+        'sales_momentum': 20,
+        'avg_range': 15,
+        'price_competitiveness': 20,
+        'product_richness': 15,
+        'region_penetration': 15,
+        'charging_compatibility': 15
+    }
+
+
+def _calc_sales_momentum(brand, periods, period_idx):
+    if period_idx < 1:
+        return 50
+    current_period = periods[period_idx]
+    prev_period = periods[period_idx - 1]
+
+    current_q = db.session.query(
+        func.sum(SalesData.quantity)
+    ).join(CarModel).filter(
+        CarModel.brand == brand,
+        SalesData.period == current_period
+    ).scalar() or 0
+    prev_q = db.session.query(
+        func.sum(SalesData.quantity)
+    ).join(CarModel).filter(
+        CarModel.brand == brand,
+        SalesData.period == prev_period
+    ).scalar() or 0
+
+    if prev_q <= 0:
+        return 60 if current_q > 0 else 30
+
+    growth = (current_q - prev_q) / prev_q * 100
+    score = 50 + growth * 2
+    return max(0, min(100, round(score, 1)))
+
+
+def _calc_avg_range(brand, all_ranges_min, all_ranges_max):
+    brand_cars = CarModel.query.filter_by(brand=brand).all()
+    if not brand_cars:
+        return 0
+    ranges = [c.range_km for c in brand_cars]
+    avg = sum(ranges) / len(ranges)
+    if all_ranges_max == all_ranges_min:
+        return 50
+    score = (avg - all_ranges_min) / (all_ranges_max - all_ranges_min) * 100
+    return round(max(0, min(100, score)), 1)
+
+
+def _calc_price_competitiveness(brand):
+    brand_cars = CarModel.query.filter_by(brand=brand).all()
+    if not brand_cars:
+        return 0
+    all_cars = CarModel.query.all()
+    if not all_cars:
+        return 50
+
+    scores = []
+    for car in brand_cars:
+        price_min, price_max = car.price - 2, car.price + 2
+        segment = [c for c in all_cars if price_min <= c.price <= price_max and c.id != car.id]
+        if not segment:
+            scores.append(60)
+            continue
+
+        seg_avg_range = sum(c.range_km for c in segment) / len(segment)
+        seg_avg_power = sum(c.power_consumption for c in segment) / len(segment)
+
+        range_score = (car.range_km / seg_avg_range * 50) if seg_avg_range > 0 else 50
+        power_score = ((seg_avg_power / car.power_consumption) * 50) if car.power_consumption > 0 else 50
+        scores.append(min(100, range_score + power_score))
+
+    return round(sum(scores) / len(scores), 1)
+
+
+def _calc_product_richness(brand, all_price_bins, max_model_count):
+    brand_cars = CarModel.query.filter_by(brand=brand).all()
+    if not brand_cars:
+        return 0
+
+    prices = [c.price for c in brand_cars]
+    covered_bins = set()
+    for p in prices:
+        for i in range(len(all_price_bins) - 1):
+            if all_price_bins[i] <= p < all_price_bins[i + 1]:
+                covered_bins.add(i)
+                break
+        else:
+            covered_bins.add(len(all_price_bins) - 1)
+
+    bin_score = len(covered_bins) / max(1, len(all_price_bins) - 1) * 60
+    model_score = min(40, len(brand_cars) / max(1, max_model_count) * 40)
+    return round(bin_score + model_score, 1)
+
+
+def _calc_region_penetration(brand, all_regions, period):
+    sales_rows = db.session.query(
+        SalesData.region, func.sum(SalesData.quantity).label('qty')
+    ).join(CarModel).filter(
+        CarModel.brand == brand,
+        SalesData.period == period
+    ).group_by(SalesData.region).all()
+
+    if not sales_rows:
+        return 0
+
+    covered = len(sales_rows)
+    cover_score = covered / max(1, len(all_regions)) * 50
+
+    quantities = [int(r.qty or 0) for r in sales_rows]
+    if len(quantities) <= 1:
+        dist_score = 50
+    else:
+        mean = sum(quantities) / len(quantities)
+        variance = sum((q - mean) ** 2 for q in quantities) / len(quantities)
+        std = variance ** 0.5
+        cv = std / mean if mean > 0 else 1
+        dist_score = max(0, 50 - cv * 20)
+
+    return round(cover_score + dist_score, 1)
+
+
+def _calc_charging_compatibility(brand, period):
+    brand_sales = db.session.query(
+        CarModel.category, func.sum(SalesData.quantity).label('qty')
+    ).join(SalesData).filter(
+        CarModel.brand == brand,
+        SalesData.period == period
+    ).group_by(CarModel.category).all()
+
+    total_qty = sum(int(r.qty or 0) for r in brand_sales)
+    if total_qty <= 0:
+        return 50
+
+    bev_qty = sum(int(r.qty or 0) for r in brand_sales if r.category == '纯电')
+    bev_ratio = bev_qty / total_qty
+
+    piles = ChargingPile.query.all()
+    avg_density = sum(p.density for p in piles) / len(piles) if piles else 0
+
+    if bev_ratio <= 0:
+        return 80
+    if avg_density <= 0:
+        return 30
+
+    match_score = min(100, avg_density / bev_ratio * 5)
+    return round(max(0, min(100, match_score)), 1)
+
+
+def _calc_brand_health(time_window='1y', category='all'):
+    periods = _get_available_periods_sorted()
+    if not periods:
+        return {'periods': [], 'brands': [], 'alerts': []}
+
+    if time_window == '1q':
+        periods = periods[-1:]
+    elif time_window == '6m':
+        periods = periods[-2:] if len(periods) >= 2 else periods
+    else:
+        periods = periods[-4:] if len(periods) >= 4 else periods
+
+    all_cars = CarModel.query.all()
+    if category == 'bev':
+        all_cars = [c for c in all_cars if c.category == '纯电']
+    elif category == 'phev':
+        all_cars = [c for c in all_cars if c.category == '混动']
+
+    all_brands = sorted(list(set(c.brand for c in all_cars)))
+    all_ranges = [c.range_km for c in CarModel.query.all()]
+    all_ranges_min, all_ranges_max = (min(all_ranges), max(all_ranges)) if all_ranges else (0, 600)
+
+    all_prices = [c.price for c in CarModel.query.all()]
+    all_price_bins = _get_default_price_bins(min(all_prices) if all_prices else 0, max(all_prices) if all_prices else 100)
+    max_model_count = max([len([c for c in all_cars if c.brand == b]) for b in all_brands] or [1])
+
+    all_regions_raw = db.session.query(SalesData.region).distinct().all()
+    all_regions = [r[0] for r in all_regions_raw]
+
+    current_period = periods[-1]
+    prev_period = periods[-2] if len(periods) >= 2 else None
+
+    brand_results = []
+    for brand in all_brands:
+        if category == 'bev':
+            brand_cars = [c for c in all_cars if c.brand == brand]
+            if not brand_cars:
+                continue
+        elif category == 'phev':
+            brand_cars = [c for c in all_cars if c.brand == brand]
+            if not brand_cars:
+                continue
+
+        dim_scores = {
+            'sales_momentum': _calc_sales_momentum(brand, periods, len(periods) - 1),
+            'avg_range': _calc_avg_range(brand, all_ranges_min, all_ranges_max),
+            'price_competitiveness': _calc_price_competitiveness(brand),
+            'product_richness': _calc_product_richness(brand, all_price_bins, max_model_count),
+            'region_penetration': _calc_region_penetration(brand, all_regions, current_period),
+            'charging_compatibility': _calc_charging_compatibility(brand, current_period)
+        }
+
+        quarterly_scores = []
+        for i, p in enumerate(periods):
+            q_dims = {
+                'sales_momentum': _calc_sales_momentum(brand, periods, i),
+                'avg_range': dim_scores['avg_range'],
+                'price_competitiveness': dim_scores['price_competitiveness'],
+                'product_richness': dim_scores['product_richness'],
+                'region_penetration': _calc_region_penetration(brand, all_regions, p),
+                'charging_compatibility': _calc_charging_compatibility(brand, p)
+            }
+            weights = _get_default_weights()
+            total = round(sum(q_dims[k] * weights[k] / 100 for k in weights), 1)
+            quarterly_scores.append({'period': p, 'score': total})
+
+        raw_metrics = _get_raw_metrics(brand, current_period, all_regions)
+
+        info = {
+            'brand': brand,
+            'dimensions': dim_scores,
+            'quarterly': quarterly_scores,
+            'raw_metrics': raw_metrics,
+            'suggestion': _generate_suggestion(brand, dim_scores, raw_metrics)
+        }
+        brand_results.append(info)
+
+    return {
+        'periods': periods,
+        'current_period': current_period,
+        'prev_period': prev_period,
+        'brands': brand_results,
+        'dimensions_meta': _get_dimensions_meta()
+    }
+
+
+def _get_raw_metrics(brand, period, all_regions):
+    brand_cars = CarModel.query.filter_by(brand=brand).all()
+    categories = list(set(c.category for c in brand_cars))
+
+    ranges = [c.range_km for c in brand_cars]
+    prices = [c.price for c in brand_cars]
+    avg_range = round(sum(ranges) / len(ranges), 1) if ranges else 0
+    avg_price = round(sum(prices) / len(prices), 2) if prices else 0
+
+    sales_q = db.session.query(
+        func.sum(SalesData.quantity)
+    ).join(CarModel).filter(
+        CarModel.brand == brand,
+        SalesData.period == period
+    ).scalar() or 0
+
+    region_rows = db.session.query(
+        SalesData.region, func.sum(SalesData.quantity).label('qty')
+    ).join(CarModel).filter(
+        CarModel.brand == brand,
+        SalesData.period == period
+    ).group_by(SalesData.region).all()
+
+    regions_covered = len(region_rows)
+    total_regions = len(all_regions)
+
+    bev_sales = db.session.query(
+        func.sum(SalesData.quantity)
+    ).join(CarModel).filter(
+        CarModel.brand == brand,
+        CarModel.category == '纯电',
+        SalesData.period == period
+    ).scalar() or 0
+
+    bev_ratio = round(bev_sales / sales_q * 100, 1) if sales_q > 0 else 0
+
+    all_avg_range_cars = CarModel.query.all()
+    all_avg_range = round(sum(c.range_km for c in all_avg_range_cars) / len(all_avg_range_cars), 1) if all_avg_range_cars else 0
+
+    all_sales = db.session.query(func.sum(SalesData.quantity)).filter(SalesData.period == period).scalar() or 0
+    market_share = round(sales_q / all_sales * 100, 2) if all_sales > 0 else 0
+
+    return {
+        'model_count': len(brand_cars),
+        'categories': categories,
+        'avg_range': avg_range,
+        'industry_avg_range': all_avg_range,
+        'avg_price': avg_price,
+        'total_sales': int(sales_q),
+        'market_share': market_share,
+        'regions_covered': regions_covered,
+        'total_regions': total_regions,
+        'bev_ratio': bev_ratio
+    }
+
+
+def _generate_suggestion(brand, dim_scores, raw_metrics):
+    weakest = min(dim_scores.items(), key=lambda x: x[1])
+    dim_meta = {d['key']: d['name'] for d in _get_dimensions_meta()}
+    dim_name = dim_meta.get(weakest[0], '综合')
+
+    if weakest[0] == 'sales_momentum':
+        return f'销量增长势头偏弱，建议加大营销投入并推出限时购车权益，同时关注重点区域促销活动。'
+    elif weakest[0] == 'avg_range':
+        return f'平均续航水平低于行业均值，建议主推长续航版本车型或通过OTA升级优化续航表现。'
+    elif weakest[0] == 'price_competitiveness':
+        return f'同价位竞争力有待提升，建议优化配置矩阵或调整定价策略，突出核心卖点。'
+    elif weakest[0] == 'product_richness':
+        return f'产品线覆盖不足，建议在空白价格带布局新车型，完善SUV/轿车/MPV产品矩阵。'
+    elif weakest[0] == 'region_penetration':
+        return f'区域渗透不均，建议在销量薄弱省份增设经销商网点并开展区域定制化推广。'
+    elif weakest[0] == 'charging_compatibility':
+        return f'补能适配度需要加强，建议加快自建充电桩布局或与主流充电运营商深化合作。'
+    return '品牌整体表现均衡，建议持续保持现有策略并关注竞品动态。'
+
+
+@bp.route("/brand_health")
+@login_required
+def brand_health():
+    return render_template('brand_health.html')
+
+
+@bp.route("/api/brand_health/data")
+@login_required
+def api_brand_health():
+    time_window = request.args.get('time_window', '1y')
+    category = request.args.get('category', 'all')
+
+    data = _calc_brand_health(time_window, category)
+    weights_config = BrandWeightConfig.query.filter_by(user_id=current_user.id).first()
+    weights = _get_default_weights()
+    if weights_config:
+        weights = {
+            'sales_momentum': weights_config.sales_momentum,
+            'avg_range': weights_config.avg_range,
+            'price_competitiveness': weights_config.price_competitiveness,
+            'product_richness': weights_config.product_richness,
+            'region_penetration': weights_config.region_penetration,
+            'charging_compatibility': weights_config.charging_compatibility
+        }
+
+    for brand in data['brands']:
+        total = round(sum(brand['dimensions'][k] * weights[k] / 100 for k in weights), 1)
+        brand['total_score'] = total
+        for q in brand['quarterly']:
+            q['score'] = round(sum([
+                brand['dimensions']['avg_range'] * weights['avg_range'] / 100,
+                brand['dimensions']['price_competitiveness'] * weights['price_competitiveness'] / 100,
+                brand['dimensions']['product_richness'] * weights['product_richness'] / 100,
+                (q['score'] - sum([
+                    brand['dimensions']['avg_range'] * weights['avg_range'] / 100,
+                    brand['dimensions']['price_competitiveness'] * weights['price_competitiveness'] / 100,
+                    brand['dimensions']['product_richness'] * weights['product_richness'] / 100
+                ])) + brand['dimensions']['sales_momentum'] * weights['sales_momentum'] / 100
+            ]), 1) if len(brand['quarterly']) > 1 else q['score']
+
+    data['brands'].sort(key=lambda b: b['total_score'], reverse=True)
+    for i, b in enumerate(data['brands']):
+        b['rank'] = i + 1
+
+    prev_data = None
+    if data['prev_period']:
+        prev_calc = _calc_brand_health('1q', category)
+        for brand in prev_calc['brands']:
+            brand['total_score'] = round(sum(brand['dimensions'][k] * weights[k] / 100 for k in weights), 1)
+        prev_calc['brands'].sort(key=lambda b: b['total_score'], reverse=True)
+        for i, b in enumerate(prev_calc['brands']):
+            b['rank'] = i + 1
+        prev_data = {b['brand']: b for b in prev_calc['brands']}
+
+    for b in data['brands']:
+        if prev_data and b['brand'] in prev_data:
+            prev_brand = prev_data[b['brand']]
+            score_diff = round(b['total_score'] - prev_brand['total_score'], 1)
+            rank_diff = prev_brand['rank'] - b['rank']
+            b['score_change'] = score_diff
+            b['rank_change'] = rank_diff
+        else:
+            b['score_change'] = 0
+            b['rank_change'] = 0
+
+    data['weights'] = weights
+    data['is_admin'] = current_user.role == 'admin'
+
+    trackings = BrandTracking.query.filter_by(user_id=current_user.id).all()
+    tracked_brands = [t.brand for t in trackings]
+    data['tracked_brands'] = tracked_brands
+
+    alerts = []
+    for t in trackings:
+        for b in data['brands']:
+            if b['brand'] == t.brand and abs(b['score_change']) >= t.alert_threshold:
+                alerts.append({
+                    'brand': t.brand,
+                    'score': b['total_score'],
+                    'change': b['score_change'],
+                    'threshold': t.alert_threshold
+                })
+                break
+    data['alerts'] = alerts
+
+    return jsonify(data)
+
+
+@bp.route("/api/brand_health/weights", methods=['GET', 'POST'])
+@login_required
+def api_brand_weights():
+    if request.method == 'GET':
+        config = BrandWeightConfig.query.filter_by(user_id=current_user.id).first()
+        if config:
+            return jsonify({
+                'sales_momentum': config.sales_momentum,
+                'avg_range': config.avg_range,
+                'price_competitiveness': config.price_competitiveness,
+                'product_richness': config.product_richness,
+                'region_penetration': config.region_penetration,
+                'charging_compatibility': config.charging_compatibility
+            })
+        return jsonify(_get_default_weights())
+
+    if current_user.role != 'admin':
+        return jsonify({'error': '仅管理员可调整权重'}), 403
+
+    data = request.json or {}
+    weights = {}
+    for key in ['sales_momentum', 'avg_range', 'price_competitiveness', 'product_richness', 'region_penetration', 'charging_compatibility']:
+        val = float(data.get(key, 0))
+        weights[key] = max(0, min(100, val))
+
+    total = sum(weights.values())
+    if total <= 0:
+        return jsonify({'error': '权重总和不能为0'}), 400
+    if abs(total - 100) > 0.01:
+        for k in weights:
+            weights[k] = round(weights[k] / total * 100, 1)
+
+    config = BrandWeightConfig.query.filter_by(user_id=current_user.id).first()
+    if not config:
+        config = BrandWeightConfig(user_id=current_user.id)
+        db.session.add(config)
+
+    config.sales_momentum = weights['sales_momentum']
+    config.avg_range = weights['avg_range']
+    config.price_competitiveness = weights['price_competitiveness']
+    config.product_richness = weights['product_richness']
+    config.region_penetration = weights['region_penetration']
+    config.charging_compatibility = weights['charging_compatibility']
+    db.session.commit()
+
+    log_audit('调整品牌健康度权重', f'调整维度权重为: {weights}')
+    return jsonify({'status': 'saved', 'weights': weights})
+
+
+@bp.route("/api/brand_health/tracking", methods=['GET', 'POST', 'DELETE'])
+@login_required
+def api_brand_tracking():
+    if request.method == 'GET':
+        trackings = BrandTracking.query.filter_by(user_id=current_user.id).order_by(BrandTracking.created_at).all()
+        return jsonify({
+            'tracked': [{'brand': t.brand, 'threshold': t.alert_threshold} for t in trackings]
+        })
+
+    if request.method == 'POST':
+        data = request.json or {}
+        brand = data.get('brand', '').strip()
+        threshold = float(data.get('threshold', 5.0))
+        if not brand:
+            return jsonify({'error': '品牌不能为空'}), 400
+
+        existing = BrandTracking.query.filter_by(user_id=current_user.id, brand=brand).first()
+        if existing:
+            return jsonify({'error': '该品牌已在跟踪清单中'}), 409
+
+        tracking = BrandTracking(user_id=current_user.id, brand=brand, alert_threshold=threshold)
+        db.session.add(tracking)
+        db.session.commit()
+        return jsonify({'status': 'added', 'brand': brand})
+
+    data = request.json or {}
+    brand = data.get('brand', '').strip()
+    if brand:
+        BrandTracking.query.filter_by(user_id=current_user.id, brand=brand).delete()
+        db.session.commit()
+    return jsonify({'status': 'removed'})
+
+
+@bp.route("/api/brand_health/brand/<brand_name>")
+@login_required
+def api_brand_detail(brand_name):
+    time_window = request.args.get('time_window', '1y')
+    category = request.args.get('category', 'all')
+    data = _calc_brand_health(time_window, category)
+
+    weights_config = BrandWeightConfig.query.filter_by(user_id=current_user.id).first()
+    weights = _get_default_weights()
+    if weights_config:
+        weights = {
+            'sales_momentum': weights_config.sales_momentum,
+            'avg_range': weights_config.avg_range,
+            'price_competitiveness': weights_config.price_competitiveness,
+            'product_richness': weights_config.product_richness,
+            'region_penetration': weights_config.region_penetration,
+            'charging_compatibility': weights_config.charging_compatibility
+        }
+
+    for brand in data['brands']:
+        brand['total_score'] = round(sum(brand['dimensions'][k] * weights[k] / 100 for k in weights), 1)
+
+    target = next((b for b in data['brands'] if b['brand'] == brand_name), None)
+    if not target:
+        return jsonify({'error': '品牌不存在'}), 404
+
+    target['total_score'] = round(sum(target['dimensions'][k] * weights[k] / 100 for k in weights), 1)
+
+    dims_avg = {}
+    for key in weights:
+        vals = [b['dimensions'][key] for b in data['brands']]
+        dims_avg[key] = round(sum(vals) / len(vals), 1) if vals else 0
+
+    target['industry_avg'] = dims_avg
+    target['weights'] = weights
+
+    return jsonify(target)

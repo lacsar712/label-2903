@@ -153,3 +153,41 @@ class CompareShareLink(db.Model):
 
     def is_expired(self):
         return datetime.utcnow() > self.expire_at
+
+
+class BrandHealthScore(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    brand = db.Column(db.String(50), nullable=False)
+    period = db.Column(db.String(20), nullable=False)
+    sales_momentum = db.Column(db.Float, nullable=False, default=0)
+    avg_range = db.Column(db.Float, nullable=False, default=0)
+    price_competitiveness = db.Column(db.Float, nullable=False, default=0)
+    product_richness = db.Column(db.Float, nullable=False, default=0)
+    region_penetration = db.Column(db.Float, nullable=False, default=0)
+    charging_compatibility = db.Column(db.Float, nullable=False, default=0)
+    total_score = db.Column(db.Float, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class BrandTracking(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    brand = db.Column(db.String(50), nullable=False)
+    alert_threshold = db.Column(db.Float, nullable=False, default=5.0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('brand_trackings', lazy=True, cascade='all, delete-orphan'))
+
+
+class BrandWeightConfig(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    sales_momentum = db.Column(db.Float, nullable=False, default=20)
+    avg_range = db.Column(db.Float, nullable=False, default=15)
+    price_competitiveness = db.Column(db.Float, nullable=False, default=20)
+    product_richness = db.Column(db.Float, nullable=False, default=15)
+    region_penetration = db.Column(db.Float, nullable=False, default=15)
+    charging_compatibility = db.Column(db.Float, nullable=False, default=15)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('brand_weight_config', uselist=False, lazy=True, cascade='all, delete-orphan'))
