@@ -1,10 +1,11 @@
 from flask import Blueprint, render_template, url_for, flash, redirect, request, jsonify, make_response
 from app import db, bcrypt
-from app.models import User, CarModel, SalesData, ChargingPile, AuditLog, Announcement, AnnouncementRead
+from app.models import User, CarModel, SalesData, ChargingPile, AuditLog, Announcement, AnnouncementRead, UserPreference
 from flask_login import login_user, current_user, logout_user, login_required
 from sqlalchemy import func, or_
 import random
 import pandas as pd
+import json as json_module
 from io import BytesIO
 from datetime import datetime, timedelta
 
@@ -1465,4 +1466,333 @@ def anxiety_index_api():
         },
         'high_list': valid_provinces[:15],
         'low_list': valid_provinces[-15:][::-1]
+    })
+
+# ========== User Preference Schemes ==========
+
+@bp.route("/preferences")
+@login_required
+def preferences_page():
+    return render_template('preferences.html')
+
+@bp.route("/api/preferences", methods=['GET'])
+@login_required
+def get_preferences():
+    prefs = UserPreference.query.filter_by(user_id=current_user.id).order_by(UserPreference.created_at).all()
+    result = []
+    for p in prefs:
+        result.append({
+            'id': p.id,
+            'scheme_name': p.scheme_name,
+            'config': p.get_config(),
+            'is_active': p.is_active,
+            'use_count': p.use_count,
+            'last_used_at': p.last_used_at.strftime('%Y-%m-%d %H:%M:%S') if p.last_used_at else '',
+            'created_at': p.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'updated_at': p.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+        })
+    return jsonify({'schemes': result})
+
+@bp.route("/api/preferences", methods=['POST'])
+@login_required
+def create_preference():
+    data = request.json
+    name = data.get('scheme_name', '').strip()
+    if not name:
+        return jsonify({'error': '方案名称不能为空'}), 400
+
+    existing = UserPreference.query.filter_by(user_id=current_user.id, scheme_name=name).first()
+    if existing:
+        return jsonify({'error': '已存在同名方案'}), 409
+
+    if data.get('is_active'):
+        UserPreference.query.filter_by(user_id=current_user.id, is_active=True).update({'is_active': False})
+
+    pref = UserPreference(
+        user_id=current_user.id,
+        scheme_name=name,
+        is_active=data.get('is_active', False)
+    )
+    pref.set_config(data.get('config', UserPreference.default_config()))
+    db.session.add(pref)
+    db.session.commit()
+    log_audit('创建偏好方案', f'创建偏好方案: {name} (ID: {pref.id})')
+    return jsonify({'id': pref.id, 'status': 'created'})
+
+@bp.route("/api/preferences/<int:id>", methods=['GET'])
+@login_required
+def get_preference(id):
+    pref = UserPreference.query.get_or_404(id)
+    if pref.user_id != current_user.id:
+        return jsonify({'error': '无权限'}), 403
+    return jsonify({
+        'id': pref.id,
+        'scheme_name': pref.scheme_name,
+        'config': pref.get_config(),
+        'is_active': pref.is_active,
+        'use_count': pref.use_count,
+        'last_used_at': pref.last_used_at.strftime('%Y-%m-%d %H:%M:%S') if pref.last_used_at else '',
+        'created_at': pref.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'updated_at': pref.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+    })
+
+@bp.route("/api/preferences/<int:id>", methods=['PUT'])
+@login_required
+def update_preference(id):
+    pref = UserPreference.query.get_or_404(id)
+    if pref.user_id != current_user.id:
+        return jsonify({'error': '无权限'}), 403
+
+    data = request.json
+
+    if 'scheme_name' in data:
+        new_name = data['scheme_name'].strip()
+        if not new_name:
+            return jsonify({'error': '方案名称不能为空'}), 400
+        dup = UserPreference.query.filter_by(user_id=current_user.id, scheme_name=new_name).first()
+        if dup and dup.id != id:
+            return jsonify({'error': '已存在同名方案'}), 409
+        pref.scheme_name = new_name
+
+    if 'config' in data:
+        pref.set_config(data['config'])
+
+    if data.get('is_active'):
+        UserPreference.query.filter_by(user_id=current_user.id, is_active=True).update({'is_active': False})
+        pref.is_active = True
+    elif 'is_active' in data:
+        pref.is_active = False
+
+    db.session.commit()
+    log_audit('更新偏好方案', f'更新偏好方案: {pref.scheme_name} (ID: {id})')
+    return jsonify({'status': 'updated'})
+
+@bp.route("/api/preferences/<int:id>", methods=['DELETE'])
+@login_required
+def delete_preference(id):
+    pref = UserPreference.query.get_or_404(id)
+    if pref.user_id != current_user.id:
+        return jsonify({'error': '无权限'}), 403
+    name = pref.scheme_name
+    was_active = pref.is_active
+    db.session.delete(pref)
+    if was_active:
+        first = UserPreference.query.filter_by(user_id=current_user.id).order_by(UserPreference.created_at).first()
+        if first:
+            first.is_active = True
+    db.session.commit()
+    log_audit('删除偏好方案', f'删除偏好方案: {name} (ID: {id})')
+    return jsonify({'status': 'deleted'})
+
+@bp.route("/api/preferences/<int:id>/activate", methods=['POST'])
+@login_required
+def activate_preference(id):
+    pref = UserPreference.query.get_or_404(id)
+    if pref.user_id != current_user.id:
+        return jsonify({'error': '无权限'}), 403
+
+    UserPreference.query.filter_by(user_id=current_user.id, is_active=True).update({'is_active': False})
+    pref.is_active = True
+    pref.use_count = (pref.use_count or 0) + 1
+    pref.last_used_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'status': 'activated', 'config': pref.get_config()})
+
+@bp.route("/api/preferences/<int:id>/copy", methods=['POST'])
+@login_required
+def copy_preference(id):
+    pref = UserPreference.query.get_or_404(id)
+    if pref.user_id != current_user.id:
+        return jsonify({'error': '无权限'}), 403
+
+    data = request.json or {}
+    new_name = data.get('scheme_name', f'{pref.scheme_name} (副本)')
+    dup = UserPreference.query.filter_by(user_id=current_user.id, scheme_name=new_name).first()
+    if dup:
+        return jsonify({'error': '已存在同名方案'}), 409
+
+    new_pref = UserPreference(
+        user_id=current_user.id,
+        scheme_name=new_name,
+        is_active=False
+    )
+    new_pref.set_config(pref.get_config())
+    db.session.add(new_pref)
+    db.session.commit()
+    log_audit('复制偏好方案', f'复制偏好方案: {pref.scheme_name} -> {new_name}')
+    return jsonify({'id': new_pref.id, 'status': 'created'})
+
+@bp.route("/api/preferences/active", methods=['GET'])
+@login_required
+def get_active_preference():
+    pref = UserPreference.query.filter_by(user_id=current_user.id, is_active=True).first()
+    if not pref:
+        return jsonify({'active': None})
+    pref.use_count = (pref.use_count or 0) + 1
+    pref.last_used_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({
+        'active': {
+            'id': pref.id,
+            'scheme_name': pref.scheme_name,
+            'config': pref.get_config()
+        }
+    })
+
+@bp.route("/api/preferences/export", methods=['GET'])
+@login_required
+def export_preferences():
+    prefs = UserPreference.query.filter_by(user_id=current_user.id).all()
+    export_data = []
+    for p in prefs:
+        export_data.append({
+            'scheme_name': p.scheme_name,
+            'config': p.get_config(),
+            'is_active': p.is_active
+        })
+    output = BytesIO()
+    output.write(json_module.dumps(export_data, ensure_ascii=False, indent=2).encode('utf-8'))
+    output.seek(0)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    response = make_response(output.getvalue())
+    response.headers["Content-Disposition"] = f"attachment; filename=preferences_{timestamp}.json"
+    response.headers["Content-type"] = "application/json"
+    return response
+
+@bp.route("/api/preferences/import", methods=['POST'])
+@login_required
+def import_preferences():
+    file = request.files.get('file')
+    if not file:
+        return jsonify({'error': '请选择文件'}), 400
+
+    try:
+        content = file.read().decode('utf-8')
+        import_data = json_module.loads(content)
+    except (json_module.JSONDecodeError, UnicodeDecodeError):
+        return jsonify({'error': '文件格式错误，请上传有效的JSON文件'}), 400
+
+    if not isinstance(import_data, list):
+        return jsonify({'error': '文件格式错误，数据应为数组'}), 400
+
+    conflicts = []
+    for item in import_data:
+        name = item.get('scheme_name', '').strip()
+        if not name:
+            continue
+        existing = UserPreference.query.filter_by(user_id=current_user.id, scheme_name=name).first()
+        if existing:
+            conflicts.append({'name': name, 'existing_id': existing.id, 'import_config': item.get('config', {})})
+
+    if conflicts:
+        return jsonify({'conflicts': conflicts, 'need_resolution': True})
+
+    for item in import_data:
+        name = item.get('scheme_name', '').strip()
+        if not name:
+            continue
+        pref = UserPreference(
+            user_id=current_user.id,
+            scheme_name=name,
+            is_active=item.get('is_active', False)
+        )
+        pref.set_config(item.get('config', UserPreference.default_config()))
+        db.session.add(pref)
+
+    db.session.commit()
+    log_audit('导入偏好方案', f'导入 {len(import_data)} 套偏好方案')
+    return jsonify({'status': 'imported', 'count': len(import_data)})
+
+@bp.route("/api/preferences/import_resolve", methods=['POST'])
+@login_required
+def import_preferences_resolve():
+    data = request.json
+    items = data.get('items', [])
+    resolutions = data.get('resolutions', {})
+
+    count = 0
+    for item in items:
+        name = item.get('scheme_name', '').strip()
+        if not name:
+            continue
+        resolution = resolutions.get(name, 'skip')
+        config = item.get('config', UserPreference.default_config())
+
+        if resolution == 'overwrite':
+            existing = UserPreference.query.filter_by(user_id=current_user.id, scheme_name=name).first()
+            if existing:
+                existing.set_config(config)
+                count += 1
+                continue
+
+        if resolution == 'merge':
+            existing = UserPreference.query.filter_by(user_id=current_user.id, scheme_name=name).first()
+            if existing:
+                merged = existing.get_config()
+                merged.update(config)
+                existing.set_config(merged)
+                count += 1
+                continue
+
+        if resolution == 'rename':
+            base = name
+            i = 1
+            new_name = f'{base} (导入)'
+            while UserPreference.query.filter_by(user_id=current_user.id, scheme_name=new_name).first():
+                i += 1
+                new_name = f'{base} (导入{i})'
+            pref = UserPreference(user_id=current_user.id, scheme_name=new_name, is_active=False)
+            pref.set_config(config)
+            db.session.add(pref)
+            count += 1
+            continue
+
+        if resolution == 'skip':
+            continue
+
+    db.session.commit()
+    log_audit('导入偏好方案(含冲突处理)', f'处理 {count} 套偏好方案')
+    return jsonify({'status': 'resolved', 'count': count})
+
+@bp.route("/api/preferences/reset", methods=['POST'])
+@login_required
+def reset_preferences():
+    UserPreference.query.filter_by(user_id=current_user.id).delete()
+    db.session.commit()
+    log_audit('重置偏好方案', f'用户 {current_user.username} 清空全部偏好方案')
+    return jsonify({'status': 'reset'})
+
+@bp.route("/api/preferences/default_config", methods=['GET'])
+@login_required
+def get_default_config():
+    return jsonify({'config': UserPreference.default_config()})
+
+@bp.route("/api/admin/preferences/stats", methods=['GET'])
+@login_required
+def admin_preference_stats():
+    if current_user.role != 'admin':
+        return jsonify({}), 403
+
+    total_schemes = UserPreference.query.count()
+    total_users_with_prefs = db.session.query(func.count(func.distinct(UserPreference.user_id))).scalar()
+    active_schemes = UserPreference.query.filter_by(is_active=True).count()
+
+    top_schemes = db.session.query(
+        UserPreference.scheme_name,
+        UserPreference.use_count,
+        User.username
+    ).join(User).order_by(UserPreference.use_count.desc()).limit(20).all()
+
+    recent_used = db.session.query(
+        UserPreference.scheme_name,
+        UserPreference.last_used_at,
+        User.username
+    ).join(User).filter(UserPreference.last_used_at.isnot(None)).order_by(UserPreference.last_used_at.desc()).limit(20).all()
+
+    return jsonify({
+        'total_schemes': total_schemes,
+        'total_users_with_prefs': total_users_with_prefs or 0,
+        'active_schemes': active_schemes,
+        'top_schemes': [{'scheme_name': s[0], 'use_count': s[1], 'username': s[2]} for s in top_schemes],
+        'recent_used': [{'scheme_name': s[0], 'last_used_at': s[1].strftime('%Y-%m-%d %H:%M:%S') if s[1] else '', 'username': s[2]} for s in recent_used]
     })

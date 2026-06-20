@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 {% block title %}控制面板{% endblock %}
 {% block content %}
+<div id="prefConflictBanner" class="pref-conflict-banner" style="display: none;">
+    <div class="pref-conflict-inner">
+        <span class="pref-conflict-icon">⚙️</span>
+        <span id="prefConflictMsg">检测到地址栏参数与本地方案不一致，请选择优先采用哪一种配置：</span>
+        <div class="pref-conflict-actions">
+            <button onclick="applyUrlParams()" class="btn" style="padding: 6px 16px; font-size: 12px;">使用地址栏参数</button>
+            <button onclick="applyLocalPref()" class="btn" style="padding: 6px 16px; font-size: 12px; background: #334155;">使用本地方案</button>
+            <button onclick="dismissConflictBanner()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 18px; margin-left: 4px;">&times;</button>
+        </div>
+    </div>
+</div>
+
 <div class="filter-pane">
     <div class="filter-group">
         <label>品牌</label>

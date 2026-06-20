@@ -18,6 +18,7 @@
             <a href="{{ url_for('main.anxiety_index') }}">充电焦虑指数</a>
             <a href="{{ url_for('main.compare') }}">竞品对标</a>
             <a href="{{ url_for('main.announcements_history') }}">公告中心</a>
+            <a href="{{ url_for('main.preferences_page') }}">偏好设置</a>
             {% if current_user.role == 'admin' %}
             <a href="{{ url_for('main.admin_data') }}">数据管理</a>
             <a href="{{ url_for('main.admin_users') }}">用户管理</a>

@@ -227,11 +227,135 @@ function refreshCharts() {
     loadMapChart();
 }
 
+let _pendingPrefConfig = null;
+let _urlHasParams = false;
+
+function applyConfigToFilters(config) {
+    if (!config) return;
+    const brandEl = document.getElementById('brandFilter');
+    const cityEl = document.getElementById('cityFilter');
+    const priceMinEl = document.getElementById('priceMin');
+    const priceMaxEl = document.getElementById('priceMax');
+    const rangeMinEl = document.getElementById('rangeMin');
+    const sortFieldEl = document.getElementById('sortField');
+    const sortOrderEl = document.getElementById('sortOrder');
+    const mapModeEl = document.getElementById('mapMode');
+
+    if (brandEl && config.brand !== undefined) brandEl.value = config.brand;
+    if (cityEl && config.city !== undefined) cityEl.value = config.city;
+    if (priceMinEl && config.price_min !== undefined) priceMinEl.value = config.price_min;
+    if (priceMaxEl && config.price_max !== undefined) priceMaxEl.value = config.price_max;
+    if (rangeMinEl && config.range_min !== undefined) rangeMinEl.value = config.range_min;
+    if (sortFieldEl && config.sort_field !== undefined) sortFieldEl.value = config.sort_field;
+    if (sortOrderEl && config.sort_order !== undefined) sortOrderEl.value = config.sort_order;
+    if (mapModeEl && config.map_mode !== undefined) mapModeEl.value = config.map_mode;
+
+    if (config.categories) {
+        document.querySelectorAll('.cat-filter').forEach(cb => {
+            cb.checked = config.categories.includes(cb.value);
+        });
+    }
+
+    if (config.expanded_charts) {
+        document.querySelectorAll('.chart-card').forEach(card => {
+            const chartBox = card.querySelector('[id$="Chart"]');
+            if (chartBox) {
+                card.style.display = config.expanded_charts.includes(chartBox.id) ? '' : 'none';
+            }
+        });
+    }
+}
+
+function getUrlFilterParams() {
+    const params = new URLSearchParams(window.location.search);
+    return params.has('brand') || params.has('city') || params.has('price_min') ||
+           params.has('price_max') || params.has('range_min') || params.has('sort_field') ||
+           params.has('sort_order') || params.has('map_mode') || params.has('category[]');
+}
+
+function parseUrlParamsToConfig() {
+    const params = new URLSearchParams(window.location.search);
+    const config = {};
+    if (params.get('brand')) config.brand = params.get('brand');
+    if (params.get('city')) config.city = params.get('city');
+    if (params.get('price_min')) config.price_min = params.get('price_min');
+    if (params.get('price_max')) config.price_max = params.get('price_max');
+    if (params.get('range_min')) config.range_min = params.get('range_min');
+    if (params.get('sort_field')) config.sort_field = params.get('sort_field');
+    if (params.get('sort_order')) config.sort_order = params.get('sort_order');
+    if (params.get('map_mode')) config.map_mode = params.get('map_mode');
+    const cats = params.getAll('category[]');
+    if (cats.length > 0) config.categories = cats;
+    return config;
+}
+
+window.applyUrlParams = function() {
+    const config = parseUrlParamsToConfig();
+    applyConfigToFilters(config);
+    refreshCharts();
+    dismissConflictBanner();
+    showToast('已应用地址栏参数', 'info');
+};
+
+window.applyLocalPref = function() {
+    if (_pendingPrefConfig) {
+        applyConfigToFilters(_pendingPrefConfig);
+        refreshCharts();
+    }
+    dismissConflictBanner();
+    showToast('已应用本地偏好方案', 'success');
+};
+
+window.dismissConflictBanner = function() {
+    const banner = document.getElementById('prefConflictBanner');
+    if (banner) banner.style.display = 'none';
+};
+
+async function loadAndApplyPreference() {
+    _urlHasParams = getUrlFilterParams();
+
+    try {
+        const res = await fetch('/api/preferences/active');
+        const data = await res.json();
+
+        if (!data.active) {
+            if (_urlHasParams) {
+                const config = parseUrlParamsToConfig();
+                applyConfigToFilters(config);
+            }
+            return;
+        }
+
+        _pendingPrefConfig = data.active.config;
+
+        if (_urlHasParams) {
+            const banner = document.getElementById('prefConflictBanner');
+            const msgEl = document.getElementById('prefConflictMsg');
+            if (banner && msgEl) {
+                msgEl.textContent = `检测到地址栏参数与本地方案「${data.active.scheme_name}」不一致，请选择优先采用哪一种配置：`;
+                banner.style.display = 'block';
+            }
+            const config = parseUrlParamsToConfig();
+            applyConfigToFilters(config);
+        } else {
+            applyConfigToFilters(data.active.config);
+        }
+    } catch (e) {
+        console.error('Failed to load preference:', e);
+        if (_urlHasParams) {
+            const config = parseUrlParamsToConfig();
+            applyConfigToFilters(config);
+        }
+    }
+}
+
 // Add event listeners for automatic refreshing
 window.addEventListener('load', () => {
     initCharts();
     if (charts.barChart) {
-        refreshCharts();
+        loadAndApplyPreference().then(() => {
+            refreshCharts();
+        });
 
         // Auto-refresh when dropdowns change
         const autoFilters = ['brandFilter', 'cityFilter', 'sortField', 'sortOrder', 'mapMode'];

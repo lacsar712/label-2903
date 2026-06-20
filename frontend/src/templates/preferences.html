@@ -1,0 +1,518 @@
+{% extends "base.html" %}
+{% block title %}偏好设置{% endblock %}
+{% block content %}
+
+<div class="pref-page-header">
+    <div class="pref-header-left">
+        <h2>偏好设置</h2>
+        <p>管理你的看板偏好方案，不同场景快速切换分析视角</p>
+    </div>
+    <div class="pref-header-actions">
+        <button onclick="exportSchemes()" class="btn btn-export-pref">
+            <span>📤</span> 导出方案
+        </button>
+        <label class="btn btn-import-pref" style="cursor: pointer;">
+            <span>📥</span> 导入方案
+            <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importSchemes(event)">
+        </label>
+        <button onclick="createNewScheme()" class="btn">
+            <span>＋</span> 新建方案
+        </button>
+    </div>
+</div>
+
+<div class="pref-content">
+    <div class="pref-sidebar">
+        <div class="pref-scheme-list" id="schemeList">
+        </div>
+        <div class="pref-sidebar-footer">
+            <button onclick="resetAllSchemes()" class="btn btn-danger" style="width: 100%; font-size: 13px; padding: 10px;">
+                🔄 恢复系统默认
+            </button>
+        </div>
+    </div>
+
+    <div class="pref-main">
+        <div id="emptyState" class="pref-empty-state">
+            <div class="pref-empty-icon">📋</div>
+            <div class="pref-empty-title">暂无偏好方案</div>
+            <div class="pref-empty-desc">点击「新建方案」创建你的第一套偏好配置</div>
+            <button onclick="createNewScheme()" class="btn" style="margin-top: 16px;">创建方案</button>
+        </div>
+
+        <div id="schemeEditor" class="pref-editor" style="display: none;">
+            <div class="pref-editor-header">
+                <input type="text" id="schemeNameInput" class="pref-name-input" placeholder="输入方案名称">
+                <div class="pref-editor-actions">
+                    <button onclick="activateScheme()" id="btnActivate" class="btn" style="font-size: 13px; padding: 8px 16px;">
+                        ⚡ 设为当前
+                    </button>
+                    <button onclick="copyScheme()" class="btn" style="font-size: 13px; padding: 8px 16px; background: #334155;">
+                        📋 复制
+                    </button>
+                    <button onclick="deleteScheme()" class="btn btn-danger" style="font-size: 13px; padding: 8px 16px;">
+                        🗑️ 删除
+                    </button>
+                </div>
+            </div>
+
+            <div class="pref-editor-body">
+                <div class="pref-section">
+                    <div class="pref-section-title">筛选条件</div>
+                    <div class="pref-form-grid">
+                        <div class="pref-form-group">
+                            <label>默认品牌</label>
+                            <select id="cfgBrand">
+                                <option value="">全部</option>
+                                <option value="特斯拉">特斯拉</option>
+                                <option value="比亚迪">比亚迪</option>
+                                <option value="蔚来">蔚来</option>
+                                <option value="小鹏">小鹏</option>
+                            </select>
+                        </div>
+                        <div class="pref-form-group">
+                            <label>默认城市</label>
+                            <select id="cfgCity">
+                                <option value="北京">北京</option>
+                                <option value="上海">上海</option>
+                                <option value="广东">广东</option>
+                                <option value="浙江">浙江</option>
+                            </select>
+                        </div>
+                        <div class="pref-form-group">
+                            <label>价格下限 (万元)</label>
+                            <input type="number" id="cfgPriceMin" placeholder="不限">
+                        </div>
+                        <div class="pref-form-group">
+                            <label>价格上限 (万元)</label>
+                            <input type="number" id="cfgPriceMax" placeholder="不限">
+                        </div>
+                        <div class="pref-form-group">
+                            <label>续航下限 (km)</label>
+                            <input type="number" id="cfgRangeMin" placeholder="不限">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pref-section">
+                    <div class="pref-section-title">动力类型</div>
+                    <div class="pref-checkbox-group">
+                        <label class="pref-checkbox-item">
+                            <input type="checkbox" id="cfgCatBEV" value="纯电"> 纯电
+                        </label>
+                        <label class="pref-checkbox-item">
+                            <input type="checkbox" id="cfgCatPHEV" value="混动"> 混动
+                        </label>
+                    </div>
+                </div>
+
+                <div class="pref-section">
+                    <div class="pref-section-title">排序与展示</div>
+                    <div class="pref-form-grid">
+                        <div class="pref-form-group">
+                            <label>排序字段</label>
+                            <select id="cfgSortField">
+                                <option value="model_name">车型名称</option>
+                                <option value="range">续航里程</option>
+                                <option value="price">价格</option>
+                                <option value="power">电耗</option>
+                                <option value="sales">销量</option>
+                            </select>
+                        </div>
+                        <div class="pref-form-group">
+                            <label>排序方向</label>
+                            <select id="cfgSortOrder">
+                                <option value="asc">升序</option>
+                                <option value="desc">降序</option>
+                            </select>
+                        </div>
+                        <div class="pref-form-group">
+                            <label>地图初始维度</label>
+                            <select id="cfgMapMode">
+                                <option value="sales">销量热力分布</option>
+                                <option value="density">充电桩密度</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pref-section">
+                    <div class="pref-section-title">默认展开的图表区域</div>
+                    <div class="pref-checkbox-group">
+                        <label class="pref-checkbox-item">
+                            <input type="checkbox" class="cfg-chart-cb" value="barChart"> 车型参数对比
+                        </label>
+                        <label class="pref-checkbox-item">
+                            <input type="checkbox" class="cfg-chart-cb" value="pieChart"> 品牌份额分布
+                        </label>
+                        <label class="pref-checkbox-item">
+                            <input type="checkbox" class="cfg-chart-cb" value="lineChart"> 销量增长趋势
+                        </label>
+                        <label class="pref-checkbox-item">
+                            <input type="checkbox" class="cfg-chart-cb" value="mapChart"> 销售热力地图
+                        </label>
+                        <label class="pref-checkbox-item">
+                            <input type="checkbox" class="cfg-chart-cb" value="scatterChart"> 相关性分析
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pref-editor-footer">
+                <button onclick="saveScheme()" class="btn" style="padding: 12px 32px;">💾 保存方案</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="conflictModal" class="pref-modal-overlay" style="display: none;">
+    <div class="pref-modal">
+        <div class="pref-modal-header">
+            <h4>导入冲突处理</h4>
+            <button class="pref-modal-close" onclick="closeConflictModal()">&times;</button>
+        </div>
+        <div class="pref-modal-body" id="conflictBody">
+        </div>
+        <div class="pref-modal-footer">
+            <button onclick="resolveConflicts()" class="btn">确认处理</button>
+            <button onclick="closeConflictModal()" class="btn" style="background: #334155;">取消</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let schemes = [];
+let currentSchemeId = null;
+let pendingImportData = null;
+let pendingConflicts = null;
+
+function gatherConfig() {
+    const categories = [];
+    if (document.getElementById('cfgCatBEV').checked) categories.push('纯电');
+    if (document.getElementById('cfgCatPHEV').checked) categories.push('混动');
+    const expandedCharts = Array.from(document.querySelectorAll('.cfg-chart-cb:checked')).map(cb => cb.value);
+
+    return {
+        brand: document.getElementById('cfgBrand').value,
+        city: document.getElementById('cfgCity').value,
+        price_min: document.getElementById('cfgPriceMin').value,
+        price_max: document.getElementById('cfgPriceMax').value,
+        range_min: document.getElementById('cfgRangeMin').value,
+        categories: categories,
+        sort_field: document.getElementById('cfgSortField').value,
+        sort_order: document.getElementById('cfgSortOrder').value,
+        map_mode: document.getElementById('cfgMapMode').value,
+        expanded_charts: expandedCharts
+    };
+}
+
+function applyConfigToForm(config) {
+    document.getElementById('cfgBrand').value = config.brand || '';
+    document.getElementById('cfgCity').value = config.city || '北京';
+    document.getElementById('cfgPriceMin').value = config.price_min || '';
+    document.getElementById('cfgPriceMax').value = config.price_max || '';
+    document.getElementById('cfgRangeMin').value = config.range_min || '';
+    document.getElementById('cfgSortField').value = config.sort_field || 'model_name';
+    document.getElementById('cfgSortOrder').value = config.sort_order || 'asc';
+    document.getElementById('cfgMapMode').value = config.map_mode || 'sales';
+
+    const cats = config.categories || ['纯电', '混动'];
+    document.getElementById('cfgCatBEV').checked = cats.includes('纯电');
+    document.getElementById('cfgCatPHEV').checked = cats.includes('混动');
+
+    const expanded = config.expanded_charts || ['barChart', 'pieChart', 'lineChart', 'mapChart', 'scatterChart'];
+    document.querySelectorAll('.cfg-chart-cb').forEach(cb => {
+        cb.checked = expanded.includes(cb.value);
+    });
+}
+
+async function loadSchemes() {
+    try {
+        const res = await fetch('/api/preferences');
+        const data = await res.json();
+        schemes = data.schemes || [];
+        renderSchemeList();
+    } catch (e) {
+        console.error('Failed to load schemes:', e);
+    }
+}
+
+function renderSchemeList() {
+    const list = document.getElementById('schemeList');
+    if (schemes.length === 0) {
+        list.innerHTML = '<div style="text-align:center; padding: 40px 16px; color: var(--text-secondary); font-size: 13px;">暂无方案<br>点击上方创建</div>';
+        document.getElementById('emptyState').style.display = 'flex';
+        document.getElementById('schemeEditor').style.display = 'none';
+        return;
+    }
+
+    document.getElementById('emptyState').style.display = 'none';
+
+    list.innerHTML = schemes.map(s => `
+        <div class="pref-scheme-item ${s.id === currentSchemeId ? 'active' : ''} ${s.is_active ? 'is-current' : ''}"
+             onclick="selectScheme(${s.id})">
+            <div class="pref-scheme-info">
+                <div class="pref-scheme-name">${escapeHtml(s.scheme_name)}</div>
+                <div class="pref-scheme-meta">
+                    ${s.is_active ? '<span class="pref-active-badge">当前使用</span>' : ''}
+                    <span>使用 ${s.use_count} 次</span>
+                </div>
+            </div>
+            <div class="pref-scheme-indicator ${s.is_active ? 'on' : ''}"></div>
+        </div>
+    `).join('');
+}
+
+function selectScheme(id) {
+    currentSchemeId = id;
+    const scheme = schemes.find(s => s.id === id);
+    if (!scheme) return;
+
+    document.getElementById('schemeNameInput').value = scheme.scheme_name;
+    applyConfigToForm(scheme.config);
+    document.getElementById('btnActivate').textContent = scheme.is_active ? '✅ 当前方案' : '⚡ 设为当前';
+    document.getElementById('btnActivate').disabled = scheme.is_active;
+
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('schemeEditor').style.display = 'flex';
+    renderSchemeList();
+}
+
+function createNewScheme() {
+    currentSchemeId = null;
+    document.getElementById('schemeNameInput').value = '';
+    applyConfigToForm({
+        brand: '', city: '北京', price_min: '', price_max: '', range_min: '',
+        categories: ['纯电', '混动'], sort_field: 'model_name', sort_order: 'asc',
+        map_mode: 'sales', expanded_charts: ['barChart', 'pieChart', 'lineChart', 'mapChart', 'scatterChart']
+    });
+    document.getElementById('btnActivate').textContent = '⚡ 设为当前';
+    document.getElementById('btnActivate').disabled = false;
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('schemeEditor').style.display = 'flex';
+    renderSchemeList();
+    document.getElementById('schemeNameInput').focus();
+}
+
+async function saveScheme() {
+    const name = document.getElementById('schemeNameInput').value.trim();
+    if (!name) {
+        showToast('请输入方案名称', 'danger');
+        return;
+    }
+    const config = gatherConfig();
+
+    try {
+        if (currentSchemeId) {
+            const res = await fetch(`/api/preferences/${currentSchemeId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scheme_name: name, config: config })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showToast(data.error || '保存失败', 'danger');
+                return;
+            }
+            showToast('方案已更新', 'success');
+        } else {
+            const res = await fetch('/api/preferences', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scheme_name: name, config: config })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showToast(data.error || '创建失败', 'danger');
+                return;
+            }
+            currentSchemeId = data.id;
+            showToast('方案已创建', 'success');
+        }
+        await loadSchemes();
+        if (currentSchemeId) selectScheme(currentSchemeId);
+    } catch (e) {
+        showToast('保存失败，请重试', 'danger');
+    }
+}
+
+async function activateScheme() {
+    if (!currentSchemeId) return;
+    try {
+        const res = await fetch(`/api/preferences/${currentSchemeId}/activate`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('已切换为当前方案', 'success');
+            await loadSchemes();
+            selectScheme(currentSchemeId);
+        }
+    } catch (e) {
+        showToast('操作失败', 'danger');
+    }
+}
+
+async function copyScheme() {
+    if (!currentSchemeId) return;
+    const name = document.getElementById('schemeNameInput').value.trim();
+    try {
+        const res = await fetch(`/api/preferences/${currentSchemeId}/copy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scheme_name: name ? `${name} (副本)` : '' })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            showToast(data.error || '复制失败', 'danger');
+            return;
+        }
+        showToast('方案已复制', 'success');
+        await loadSchemes();
+        selectScheme(data.id);
+    } catch (e) {
+        showToast('复制失败', 'danger');
+    }
+}
+
+async function deleteScheme() {
+    if (!currentSchemeId) return;
+    showModal('删除方案', '确定要删除该偏好方案吗？此操作不可撤销。', async () => {
+        try {
+            await fetch(`/api/preferences/${currentSchemeId}`, { method: 'DELETE' });
+            showToast('方案已删除', 'success');
+            currentSchemeId = null;
+            document.getElementById('schemeEditor').style.display = 'none';
+            await loadSchemes();
+        } catch (e) {
+            showToast('删除失败', 'danger');
+        }
+    });
+}
+
+async function resetAllSchemes() {
+    showModal('恢复系统默认', '将清空全部个性化偏好方案，确定继续？', async () => {
+        try {
+            await fetch('/api/preferences/reset', { method: 'POST' });
+            showToast('已恢复系统默认', 'success');
+            currentSchemeId = null;
+            document.getElementById('schemeEditor').style.display = 'none';
+            await loadSchemes();
+        } catch (e) {
+            showToast('操作失败', 'danger');
+        }
+    });
+}
+
+async function exportSchemes() {
+    if (schemes.length === 0) {
+        showToast('暂无方案可导出', 'info');
+        return;
+    }
+    try {
+        const res = await fetch('/api/preferences/export');
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const disposition = res.headers.get('Content-Disposition');
+        let filename = `preferences_${new Date().toISOString().slice(0, 10)}.json`;
+        if (disposition) {
+            const matches = disposition.match(/filename="?([^"]+)"?/);
+            if (matches && matches[1]) filename = matches[1];
+        }
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        showToast('方案导出成功', 'success');
+    } catch (e) {
+        showToast('导出失败', 'danger');
+    }
+}
+
+async function importSchemes(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    event.target.value = '';
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch('/api/preferences/import', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (data.need_resolution) {
+            pendingConflicts = data.conflicts;
+            showConflictModal(data.conflicts);
+            return;
+        }
+
+        if (data.error) {
+            showToast(data.error, 'danger');
+            return;
+        }
+
+        showToast(`成功导入 ${data.count} 套方案`, 'success');
+        await loadSchemes();
+    } catch (e) {
+        showToast('导入失败，请检查文件格式', 'danger');
+    }
+}
+
+function showConflictModal(conflicts) {
+    const body = document.getElementById('conflictBody');
+    body.innerHTML = conflicts.map(c => `
+        <div class="conflict-item">
+            <div class="conflict-name">「${escapeHtml(c.name)}」</div>
+            <div class="conflict-label">已存在同名方案，请选择处理方式：</div>
+            <select class="conflict-select" data-name="${escapeHtml(c.name)}">
+                <option value="skip">跳过</option>
+                <option value="overwrite">覆盖已有</option>
+                <option value="merge">合并配置</option>
+                <option value="rename">保留为新方案</option>
+            </select>
+        </div>
+    `).join('');
+    document.getElementById('conflictModal').style.display = 'flex';
+}
+
+function closeConflictModal() {
+    document.getElementById('conflictModal').style.display = 'none';
+    pendingConflicts = null;
+}
+
+async function resolveConflicts() {
+    if (!pendingConflicts) return;
+
+    const resolutions = {};
+    document.querySelectorAll('.conflict-select').forEach(sel => {
+        resolutions[sel.dataset.name] = sel.value;
+    });
+
+    try {
+        const res = await fetch('/api/preferences/import_resolve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: pendingConflicts, resolutions: resolutions })
+        });
+        const data = await res.json();
+        showToast(`成功处理 ${data.count} 套方案`, 'success');
+        closeConflictModal();
+        await loadSchemes();
+    } catch (e) {
+        showToast('处理失败', 'danger');
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+window.addEventListener('load', () => {
+    loadSchemes();
+});
+</script>
+{% endblock %}

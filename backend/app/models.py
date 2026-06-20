@@ -1,6 +1,7 @@
 from app import db, login_manager
 from flask_login import UserMixin
 from datetime import datetime
+import json
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -65,6 +66,43 @@ class Announcement(db.Model):
 
     creator = db.relationship('User', backref=db.backref('announcements', lazy=True))
     reads = db.relationship('AnnouncementRead', backref='announcement', lazy=True, cascade='all, delete-orphan')
+
+class UserPreference(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    scheme_name = db.Column(db.String(100), nullable=False)
+    config_json = db.Column(db.Text, nullable=False, default='{}')
+    is_active = db.Column(db.Boolean, nullable=False, default=False)
+    use_count = db.Column(db.Integer, nullable=False, default=0)
+    last_used_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('preferences', lazy=True, cascade='all, delete-orphan'))
+
+    def get_config(self):
+        try:
+            return json.loads(self.config_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    def set_config(self, config_dict):
+        self.config_json = json.dumps(config_dict, ensure_ascii=False)
+
+    @staticmethod
+    def default_config():
+        return {
+            'brand': '',
+            'city': '北京',
+            'categories': ['纯电', '混动'],
+            'price_min': '',
+            'price_max': '',
+            'range_min': '',
+            'sort_field': 'model_name',
+            'sort_order': 'asc',
+            'map_mode': 'sales',
+            'expanded_charts': ['barChart', 'pieChart', 'lineChart', 'mapChart', 'scatterChart']
+        }
 
 class AnnouncementRead(db.Model):
     id = db.Column(db.Integer, primary_key=True)
