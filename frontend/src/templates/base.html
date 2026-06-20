@@ -16,10 +16,12 @@
             {% if current_user.is_authenticated %}
             <a href="{{ url_for('main.home') }}">数据大屏</a>
             <a href="{{ url_for('main.compare') }}">竞品对标</a>
+            <a href="{{ url_for('main.announcements_history') }}">公告中心</a>
             {% if current_user.role == 'admin' %}
             <a href="{{ url_for('main.admin_data') }}">数据管理</a>
             <a href="{{ url_for('main.admin_users') }}">用户管理</a>
             <a href="{{ url_for('main.admin_audit') }}">操作审计</a>
+            <a href="{{ url_for('main.admin_announcements') }}">公告管理</a>
             {% endif %}
             <a href="{{ url_for('main.change_password') }}">修改密码</a>
             <a href="{{ url_for('main.logout') }}">安全退出</a>
@@ -29,6 +31,44 @@
             {% endif %}
         </div>
     </nav>
+
+    {% if current_user.is_authenticated %}
+    <div id="announcementBanner" class="announcement-banner" style="display: none;">
+        <div class="announcement-banner-inner">
+            <div class="announcement-banner-icon">📢</div>
+            <div class="announcement-banner-track" id="announcementTrack">
+            </div>
+            <div class="announcement-banner-controls">
+                <button class="banner-prev" onclick="prevAnnouncement()">&#10094;</button>
+                <span class="banner-counter" id="bannerCounter">0 / 0</span>
+                <button class="banner-next" onclick="nextAnnouncement()">&#10095;</button>
+                <button class="banner-close" onclick="closeBanner()">&times;</button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div id="announcementPanel" class="announcement-panel-overlay" style="display: none;">
+        <div class="announcement-panel">
+            <div class="announcement-panel-header">
+                <h3 id="panelTitle">公告详情</h3>
+                <button class="panel-close" onclick="closeAnnouncementPanel()">&times;</button>
+            </div>
+            <div class="announcement-panel-body">
+                <div class="panel-meta">
+                    <span id="panelCategory" class="announcement-category">系统维护</span>
+                    <span id="panelPinned" style="color: #f59e0b; display: none;">📌 置顶</span>
+                    <span class="panel-date" id="panelDate"></span>
+                    <span class="panel-author" id="panelAuthor"></span>
+                </div>
+                <div class="panel-content" id="panelContent"></div>
+            </div>
+            <div class="announcement-panel-footer">
+                <button id="panelConfirmBtn" class="btn" style="display: none;" onclick="confirmRead()">确认已读</button>
+            </div>
+        </div>
+    </div>
+
     <div class="container">
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}

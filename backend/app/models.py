@@ -45,3 +45,32 @@ class AuditLog(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     user = db.relationship('User', backref=db.backref('audit_logs', lazy=True))
+
+class Announcement(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    category = db.Column(db.String(20), nullable=False, default='系统维护')
+    status = db.Column(db.String(20), nullable=False, default='draft')
+    audience = db.Column(db.String(20), nullable=False, default='all')
+    is_pinned = db.Column(db.Boolean, nullable=False, default=False)
+    pin_priority = db.Column(db.Integer, nullable=False, default=0)
+    require_confirmation = db.Column(db.Boolean, nullable=False, default=False)
+    effective_at = db.Column(db.DateTime, nullable=True)
+    expire_at = db.Column(db.DateTime, nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_by_name = db.Column(db.String(20), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    creator = db.relationship('User', backref=db.backref('announcements', lazy=True))
+    reads = db.relationship('AnnouncementRead', backref='announcement', lazy=True, cascade='all, delete-orphan')
+
+class AnnouncementRead(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    announcement_id = db.Column(db.Integer, db.ForeignKey('announcement.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    username = db.Column(db.String(20), nullable=False)
+    read_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('announcement_reads', lazy=True))

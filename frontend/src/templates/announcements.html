@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}公告中心{% endblock %}
+{% block content %}
+
+<div class="filter-pane">
+    <h3><i class="icon"></i> 历史公告中心</h3>
+    <div style="margin-left: auto; display: flex; gap: 15px; align-items: center;">
+        <div class="filter-group">
+            <label>分类</label>
+            <select id="filterCategory" style="width: 120px;">
+                <option value="">全部</option>
+                <option value="系统维护">系统维护</option>
+                <option value="数据更新">数据更新</option>
+                <option value="功能上线">功能上线</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>开始日期</label>
+            <input type="date" id="filterStartDate" style="width: 140px;">
+        </div>
+        <div class="filter-group">
+            <label>结束日期</label>
+            <input type="date" id="filterEndDate" style="width: 140px;">
+        </div>
+        <button onclick="searchAnnouncements()" class="btn" style="align-self: flex-end;">查询</button>
+        <button onclick="resetFilters()" class="btn" style="align-self: flex-end; background: #334155;">重置</button>
+    </div>
+</div>
+
+<div class="chart-card" style="padding: 0; min-height: 600px;">
+    <div class="announcement-list" id="announcementList">
+    </div>
+    <div style="padding: 20px 24px; border-top: 1px solid var(--glass-border); display: flex; justify-content: space-between; align-items: center;">
+        <div id="paginationInfo" style="color: var(--text-secondary); font-size: 14px;">
+            共 0 条记录
+        </div>
+        <div id="paginationControls" style="display: flex; gap: 8px;">
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentPage = 1;
+    const perPage = 10;
+
+    const categoryColors = {
+        '系统维护': '#f59e0b',
+        '数据更新': '#38bdf8',
+        '功能上线': '#10b981'
+    };
+
+    async function loadAnnouncements(page = 1) {
+        currentPage = page;
+        const category = document.getElementById('filterCategory').value;
+        const startDate = document.getElementById('filterStartDate').value;
+        const endDate = document.getElementById('filterEndDate').value;
+
+        const params = new URLSearchParams({
+            page: page,
+            per_page: perPage
+        });
+        if (category) params.append('category', category);
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate);
+
+        try {
+            const res = await fetch(`/api/announcements?${params.toString()}`);
+            const data = await res.json();
+            renderAnnouncements(data.announcements);
+            renderPagination(data);
+        } catch (e) {
+            console.error('Failed to load announcements:', e);
+        }
+    }
+
+    function renderAnnouncements(announcements) {
+        const list = document.getElementById('announcementList');
+        if (!announcements || announcements.length === 0) {
+            list.innerHTML = `
+                <div style="text-align: center; padding: 80px; color: var(--text-secondary);">
+                    暂无公告记录
+                </div>
+            `;
+            return;
+        }
+
+        list.innerHTML = announcements.map(a => {
+            const catColor = categoryColors[a.category] || '#94a3b8';
+            return `
+                <div class="announcement-item" onclick="openAnnouncementDetail(${a.id})">
+                    <div class="announcement-item-left">
+                        <div class="announcement-pin">
+                            ${a.is_pinned ? '<span style="color: #f59e0b;">📌 置顶</span>' : ''}
+                        </div>
+                        <div class="announcement-item-title">
+                            ${a.title}
+                            ${a.require_confirmation ? '<span class="badge-confirm">需确认</span>' : ''}
+                            ${!a.is_read ? '<span class="badge-unread">新</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="announcement-item-right">
+                        <span class="announcement-category" style="background: ${catColor}20; color: ${catColor};">
+                            ${a.category}
+                        </span>
+                        <span class="announcement-date">${a.created_at}</span>
+                        <span class="announcement-author">发布人: ${a.created_by}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderPagination(data) {
+        const info = document.getElementById('paginationInfo');
+        const controls = document.getElementById('paginationControls');
+        
+        const start = (data.current_page - 1) * data.per_page + 1;
+        const end = Math.min(data.current_page * data.per_page, data.total);
+        info.textContent = `共 ${data.total} 条记录，显示 ${start}-${end} 条`;
+
+        let html = '';
+        
+        html += `<button onclick="goToPage(${data.current_page - 1})" class="btn" style="padding: 6px 14px; font-size: 13px; ${data.current_page <= 1 ? 'opacity: 0.5; cursor: not-allowed;' : ''}" ${data.current_page <= 1 ? 'disabled' : ''}>上一页</button>`;
+        
+        const maxVisible = 5;
+        let startPage = Math.max(1, data.current_page - Math.floor(maxVisible / 2));
+        let endPage = Math.min(data.pages, startPage + maxVisible - 1);
+        startPage = Math.max(1, endPage - maxVisible + 1);
+
+        for (let i = startPage; i <= endPage; i++) {
+            const isActive = i === data.current_page;
+            html += `<button onclick="goToPage(${i})" class="btn" style="padding: 6px 14px; font-size: 13px; ${isActive ? 'background: linear-gradient(135deg, #38bdf8, #818cf8);' : 'background: #334155;'}">${i}</button>`;
+        }
+        
+        html += `<button onclick="goToPage(${data.current_page + 1})" class="btn" style="padding: 6px 14px; font-size: 13px; ${data.current_page >= data.pages ? 'opacity: 0.5; cursor: not-allowed;' : ''}" ${data.current_page >= data.pages ? 'disabled' : ''}>下一页</button>`;
+        
+        controls.innerHTML = html;
+    }
+
+    function goToPage(page) {
+        if (page < 1) return;
+        loadAnnouncements(page);
+    }
+
+    function searchAnnouncements() {
+        loadAnnouncements(1);
+    }
+
+    function resetFilters() {
+        document.getElementById('filterCategory').value = '';
+        document.getElementById('filterStartDate').value = '';
+        document.getElementById('filterEndDate').value = '';
+        loadAnnouncements(1);
+    }
+
+    function openAnnouncementDetail(id) {
+        if (typeof openAnnouncementPanel === 'function') {
+            openAnnouncementPanel(id);
+        }
+    }
+
+    window.addEventListener('load', () => {
+        loadAnnouncements(1);
+    });
+</script>
+{% endblock %}

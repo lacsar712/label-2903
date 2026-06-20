@@ -358,3 +358,225 @@ function exportData(type) {
             showToast(`${label}导出失败，请重试`, 'danger');
         });
 }
+
+let activeAnnouncements = [];
+let currentBannerIndex = 0;
+let bannerAutoTimer = null;
+let currentPanelId = null;
+let bannerDismissedIds = new Set();
+
+const categoryColors = {
+    '系统维护': '#f59e0b',
+    '数据更新': '#38bdf8',
+    '功能上线': '#10b981'
+};
+
+async function loadActiveAnnouncements() {
+    try {
+        const res = await fetch('/api/announcements/active');
+        const data = await res.json();
+        activeAnnouncements = data.announcements || [];
+        renderBanner();
+    } catch (e) {
+        console.error('Failed to load announcements:', e);
+    }
+}
+
+function renderBanner() {
+    const banner = document.getElementById('announcementBanner');
+    const track = document.getElementById('announcementTrack');
+    const counter = document.getElementById('bannerCounter');
+
+    if (!banner || !track) return;
+
+    const visibleAnnouncements = activeAnnouncements.filter(a => !bannerDismissedIds.has(a.id) || a.is_pinned);
+
+    if (visibleAnnouncements.length === 0) {
+        banner.style.display = 'none';
+        stopBannerAutoPlay();
+        return;
+    }
+
+    banner.style.display = 'block';
+
+    const catColor = categoryColors[visibleAnnouncements[currentBannerIndex]?.category] || '#94a3b8';
+    const a = visibleAnnouncements[currentBannerIndex];
+
+    track.innerHTML = `
+        <div class="banner-item" style="opacity: 1;" onclick="openAnnouncementPanel(${a.id})">
+            ${a.is_pinned ? '<span class="banner-item-pin">📌</span>' : ''}
+            <span class="banner-item-category" style="background: ${catColor}30; color: ${catColor};">${a.category}</span>
+            <span class="banner-item-title">${a.title}</span>
+            ${a.require_confirmation ? '<span class="badge-confirm">需确认</span>' : ''}
+            ${!a.is_read ? '<span class="badge-unread">新</span>' : ''}
+        </div>
+    `;
+
+    counter.textContent = `${currentBannerIndex + 1} / ${visibleAnnouncements.length}`;
+
+    if (visibleAnnouncements.length > 1) {
+        startBannerAutoPlay();
+    } else {
+        stopBannerAutoPlay();
+    }
+}
+
+function startBannerAutoPlay() {
+    stopBannerAutoPlay();
+    bannerAutoTimer = setInterval(() => {
+        nextAnnouncement();
+    }, 5000);
+}
+
+function stopBannerAutoPlay() {
+    if (bannerAutoTimer) {
+        clearInterval(bannerAutoTimer);
+        bannerAutoTimer = null;
+    }
+}
+
+function nextAnnouncement() {
+    const visible = activeAnnouncements.filter(a => !bannerDismissedIds.has(a.id) || a.is_pinned);
+    if (visible.length <= 1) return;
+    currentBannerIndex = (currentBannerIndex + 1) % visible.length;
+    renderBanner();
+}
+
+function prevAnnouncement() {
+    const visible = activeAnnouncements.filter(a => !bannerDismissedIds.has(a.id) || a.is_pinned);
+    if (visible.length <= 1) return;
+    currentBannerIndex = (currentBannerIndex - 1 + visible.length) % visible.length;
+    renderBanner();
+}
+
+function closeBanner() {
+    const visible = activeAnnouncements.filter(a => !bannerDismissedIds.has(a.id) || a.is_pinned);
+    const current = visible[currentBannerIndex];
+    if (!current) return;
+
+    if (current.is_pinned) {
+        showToast('置顶公告无法关闭', 'info');
+        return;
+    }
+
+    bannerDismissedIds.add(current.id);
+    
+    const newVisible = activeAnnouncements.filter(a => !bannerDismissedIds.has(a.id) || a.is_pinned);
+    if (currentBannerIndex >= newVisible.length) {
+        currentBannerIndex = Math.max(0, newVisible.length - 1);
+    }
+    
+    renderBanner();
+    showToast('公告已关闭，本次浏览不再显示', 'info');
+}
+
+function openAnnouncementPanel(id) {
+    currentPanelId = id;
+    const panel = document.getElementById('announcementPanel');
+    if (!panel) return;
+
+    fetch(`/api/announcements/${id}`)
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('panelTitle').textContent = data.title;
+            document.getElementById('panelContent').innerHTML = data.content;
+            document.getElementById('panelDate').textContent = `发布时间: ${data.created_at}`;
+            document.getElementById('panelAuthor').textContent = `发布人: ${data.created_by}`;
+            
+            const catEl = document.getElementById('panelCategory');
+            const catColor = categoryColors[data.category] || '#94a3b8';
+            catEl.textContent = data.category;
+            catEl.style.background = `${catColor}20`;
+            catEl.style.color = catColor;
+
+            const pinnedEl = document.getElementById('panelPinned');
+            pinnedEl.style.display = data.is_pinned ? 'inline-block' : 'none';
+
+            const confirmBtn = document.getElementById('panelConfirmBtn');
+            if (data.require_confirmation && !data.is_read) {
+                confirmBtn.style.display = 'block';
+            } else {
+                confirmBtn.style.display = 'none';
+            }
+
+            panel.style.display = 'flex';
+            
+            if (!data.is_read) {
+                markAsRead(id);
+            }
+        })
+        .catch(e => {
+            console.error('Failed to load announcement:', e);
+            showToast('加载公告详情失败', 'danger');
+        });
+}
+
+function closeAnnouncementPanel() {
+    const panel = document.getElementById('announcementPanel');
+    if (panel) {
+        panel.style.display = 'none';
+    }
+    currentPanelId = null;
+}
+
+function confirmRead() {
+    if (!currentPanelId) return;
+    
+    fetch(`/api/announcements/${currentPanelId}/read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(d => {
+        showToast('已确认阅读', 'success');
+        document.getElementById('panelConfirmBtn').style.display = 'none';
+        
+        const idx = activeAnnouncements.findIndex(a => a.id === currentPanelId);
+        if (idx !== -1) {
+            activeAnnouncements[idx].is_read = true;
+        }
+        
+        renderBanner();
+    })
+    .catch(() => showToast('操作失败', 'danger'));
+}
+
+function markAsRead(id) {
+    fetch(`/api/announcements/${id}/read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    }).catch(e => console.error('Mark read error:', e));
+    
+    const idx = activeAnnouncements.findIndex(a => a.id === id);
+    if (idx !== -1) {
+        activeAnnouncements[idx].is_read = true;
+    }
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeAnnouncementPanel();
+    }
+});
+
+document.addEventListener('click', function(e) {
+    const panelOverlay = document.getElementById('announcementPanel');
+    if (panelOverlay && panelOverlay.style.display === 'flex' && e.target === panelOverlay) {
+        const panel = panelOverlay.querySelector('.announcement-panel');
+        if (panel && !panel.contains(e.target)) {
+            const confirmBtn = document.getElementById('panelConfirmBtn');
+            if (confirmBtn && confirmBtn.style.display !== 'none') {
+                showToast('请先确认已读此公告', 'warning');
+                return;
+            }
+            closeAnnouncementPanel();
+        }
+    }
+});
+
+window.addEventListener('load', () => {
+    const bannerEl = document.getElementById('announcementBanner');
+    if (bannerEl) {
+        loadActiveAnnouncements();
+    }
+});

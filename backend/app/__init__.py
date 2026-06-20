@@ -9,13 +9,28 @@ login_manager = LoginManager()
 bcrypt = Bcrypt()
 
 def create_app():
-    # Inside Docker, frontend is at /frontend
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+    docker_template = '/frontend/src/templates'
+    docker_static = '/frontend/src'
+    docker_db = 'sqlite:////database/nev_data.db'
+    
+    local_template = os.path.join(base_dir, 'frontend', 'src', 'templates')
+    local_static = os.path.join(base_dir, 'frontend', 'src')
+    local_db = f'sqlite:///{os.path.join(base_dir, "database", "nev_data.db")}'
+    
+    use_docker = os.path.exists(docker_template)
+    
+    template_folder = docker_template if use_docker else local_template
+    static_folder = docker_static if use_docker else local_static
+    db_uri = docker_db if use_docker else local_db
+    
     app = Flask(__name__, 
-                template_folder='/frontend/src/templates',
-                static_folder='/frontend/src')
+                template_folder=template_folder,
+                static_folder=static_folder)
     
     app.config['SECRET_KEY'] = 'nev_secret_key_2024'
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////database/nev_data.db'
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     db.init_app(app)

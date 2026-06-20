@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, url_for, flash, redirect, request, jsonify, make_response
 from app import db, bcrypt
-from app.models import User, CarModel, SalesData, ChargingPile, AuditLog
+from app.models import User, CarModel, SalesData, ChargingPile, AuditLog, Announcement, AnnouncementRead
 from flask_login import login_user, current_user, logout_user, login_required
 from sqlalchemy import func, or_
 import random
@@ -707,4 +707,395 @@ def audit_logs():
         'pages': pagination.pages,
         'current_page': pagination.page,
         'per_page': per_page
+    })
+
+# --- Announcement Management ---
+
+@bp.route("/admin/announcements")
+@login_required
+def admin_announcements():
+    if current_user.role != 'admin':
+        return redirect(url_for('main.home'))
+    return render_template('admin_announcements.html')
+
+def _parse_datetime(dt_str):
+    if not dt_str:
+        return None
+    try:
+        return datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        try:
+            return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M')
+        except ValueError:
+            try:
+                return datetime.strptime(dt_str, '%Y-%m-%d')
+            except ValueError:
+                return None
+
+@bp.route("/api/admin/announcements", methods=['GET'])
+@login_required
+def get_announcements_admin():
+    if current_user.role != 'admin':
+        return jsonify([]), 403
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    status = request.args.get('status', '')
+    category = request.args.get('category', '')
+    keyword = request.args.get('keyword', '')
+    
+    query = Announcement.query
+    
+    if status:
+        query = query.filter(Announcement.status == status)
+    if category:
+        query = query.filter(Announcement.category == category)
+    if keyword:
+        query = query.filter(or_(
+            Announcement.title.contains(keyword),
+            Announcement.content.contains(keyword)
+        ))
+    
+    query = query.order_by(
+        Announcement.is_pinned.desc(),
+        Announcement.pin_priority.desc(),
+        Announcement.created_at.desc()
+    )
+    
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    
+    announcements = []
+    for a in pagination.items:
+        read_count = AnnouncementRead.query.filter_by(announcement_id=a.id).count()
+        total_users = User.query.count()
+        announcements.append({
+            'id': a.id,
+            'title': a.title,
+            'category': a.category,
+            'status': a.status,
+            'audience': a.audience,
+            'is_pinned': a.is_pinned,
+            'pin_priority': a.pin_priority,
+            'require_confirmation': a.require_confirmation,
+            'effective_at': a.effective_at.strftime('%Y-%m-%d %H:%M:%S') if a.effective_at else '',
+            'expire_at': a.expire_at.strftime('%Y-%m-%d %H:%M:%S') if a.expire_at else '',
+            'created_by': a.created_by_name,
+            'created_at': a.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'read_count': read_count,
+            'unread_count': total_users - read_count if a.audience == 'all' else (User.query.filter_by(role='admin').count() - read_count)
+        })
+    
+    return jsonify({
+        'announcements': announcements,
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page,
+        'per_page': per_page
+    })
+
+@bp.route("/api/admin/announcements/<int:id>", methods=['GET'])
+@login_required
+def get_announcement_detail_admin(id):
+    if current_user.role != 'admin':
+        return jsonify({}), 403
+    
+    a = Announcement.query.get_or_404(id)
+    return jsonify({
+        'id': a.id,
+        'title': a.title,
+        'content': a.content,
+        'category': a.category,
+        'status': a.status,
+        'audience': a.audience,
+        'is_pinned': a.is_pinned,
+        'pin_priority': a.pin_priority,
+        'require_confirmation': a.require_confirmation,
+        'effective_at': a.effective_at.strftime('%Y-%m-%d %H:%M') if a.effective_at else '',
+        'expire_at': a.expire_at.strftime('%Y-%m-%d %H:%M') if a.expire_at else '',
+        'created_by': a.created_by_name,
+        'created_at': a.created_at.strftime('%Y-%m-%d %H:%M:%S')
+    })
+
+@bp.route("/api/admin/announcements", methods=['POST'])
+@login_required
+def create_announcement():
+    if current_user.role != 'admin':
+        return jsonify({}), 403
+    
+    data = request.json
+    announcement = Announcement(
+        title=data['title'],
+        content=data.get('content', ''),
+        category=data.get('category', '系统维护'),
+        status=data.get('status', 'draft'),
+        audience=data.get('audience', 'all'),
+        is_pinned=data.get('is_pinned', False),
+        pin_priority=data.get('pin_priority', 0),
+        require_confirmation=data.get('require_confirmation', False),
+        effective_at=_parse_datetime(data.get('effective_at', '')),
+        expire_at=_parse_datetime(data.get('expire_at', '')),
+        created_by=current_user.id,
+        created_by_name=current_user.username
+    )
+    
+    db.session.add(announcement)
+    db.session.commit()
+    
+    log_audit('创建公告', f'创建公告: {announcement.title} (ID: {announcement.id})')
+    return jsonify({'id': announcement.id, 'status': 'created'})
+
+@bp.route("/api/admin/announcements/<int:id>", methods=['PUT'])
+@login_required
+def update_announcement(id):
+    if current_user.role != 'admin':
+        return jsonify({}), 403
+    
+    a = Announcement.query.get_or_404(id)
+    data = request.json
+    
+    a.title = data.get('title', a.title)
+    a.content = data.get('content', a.content)
+    a.category = data.get('category', a.category)
+    a.status = data.get('status', a.status)
+    a.audience = data.get('audience', a.audience)
+    a.is_pinned = data.get('is_pinned', a.is_pinned)
+    a.pin_priority = data.get('pin_priority', a.pin_priority)
+    a.require_confirmation = data.get('require_confirmation', a.require_confirmation)
+    
+    if 'effective_at' in data:
+        a.effective_at = _parse_datetime(data['effective_at'])
+    if 'expire_at' in data:
+        a.expire_at = _parse_datetime(data['expire_at'])
+    
+    db.session.commit()
+    
+    log_audit('更新公告', f'更新公告: {a.title} (ID: {id})')
+    return jsonify({'status': 'updated'})
+
+@bp.route("/api/admin/announcements/<int:id>", methods=['DELETE'])
+@login_required
+def delete_announcement(id):
+    if current_user.role != 'admin':
+        return jsonify({}), 403
+    
+    a = Announcement.query.get_or_404(id)
+    title = a.title
+    db.session.delete(a)
+    db.session.commit()
+    
+    log_audit('删除公告', f'删除公告: {title} (ID: {id})')
+    return jsonify({'status': 'deleted'})
+
+@bp.route("/api/admin/announcements/batch", methods=['POST'])
+@login_required
+def batch_announcements():
+    if current_user.role != 'admin':
+        return jsonify({}), 403
+    
+    data = request.json
+    ids = data.get('ids', [])
+    action = data.get('action', '')
+    
+    if not ids or not action:
+        return jsonify({'error': '参数错误'}), 400
+    
+    announcements = Announcement.query.filter(Announcement.id.in_(ids)).all()
+    
+    if action == 'publish':
+        for a in announcements:
+            a.status = 'published'
+        log_audit('批量发布公告', f'批量发布 {len(announcements)} 条公告')
+    elif action == 'offline':
+        for a in announcements:
+            a.status = 'offline'
+        log_audit('批量下线公告', f'批量下线 {len(announcements)} 条公告')
+    elif action == 'delete':
+        for a in announcements:
+            db.session.delete(a)
+        log_audit('批量删除公告', f'批量删除 {len(announcements)} 条公告')
+    else:
+        return jsonify({'error': '不支持的操作'}), 400
+    
+    db.session.commit()
+    return jsonify({'status': 'success', 'count': len(announcements)})
+
+@bp.route("/api/admin/announcements/stats", methods=['GET'])
+@login_required
+def announcement_stats_admin():
+    if current_user.role != 'admin':
+        return jsonify({}), 403
+    
+    draft_count = Announcement.query.filter_by(status='draft').count()
+    published_count = Announcement.query.filter_by(status='published').count()
+    offline_count = Announcement.query.filter_by(status='offline').count()
+    
+    return jsonify({
+        'draft_count': draft_count,
+        'published_count': published_count,
+        'offline_count': offline_count
+    })
+
+# --- User-side Announcements ---
+
+@bp.route("/announcements")
+@login_required
+def announcements_history():
+    return render_template('announcements.html')
+
+def _get_effective_announcements_query():
+    now = datetime.utcnow()
+    query = Announcement.query.filter(
+        Announcement.status == 'published',
+        or_(Announcement.effective_at.is_(None), Announcement.effective_at <= now),
+        or_(Announcement.expire_at.is_(None), Announcement.expire_at >= now)
+    )
+    
+    if current_user.role != 'admin':
+        query = query.filter(Announcement.audience == 'all')
+    
+    return query
+
+@bp.route("/api/announcements/active", methods=['GET'])
+@login_required
+def get_active_announcements():
+    query = _get_effective_announcements_query()
+    announcements = query.order_by(
+        Announcement.is_pinned.desc(),
+        Announcement.pin_priority.desc(),
+        Announcement.created_at.desc()
+    ).all()
+    
+    read_ids = [r.announcement_id for r in AnnouncementRead.query.filter_by(user_id=current_user.id).all()]
+    
+    result = []
+    for a in announcements:
+        result.append({
+            'id': a.id,
+            'title': a.title,
+            'content': a.content,
+            'category': a.category,
+            'is_pinned': a.is_pinned,
+            'pin_priority': a.pin_priority,
+            'require_confirmation': a.require_confirmation,
+            'created_by': a.created_by_name,
+            'created_at': a.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'is_read': a.id in read_ids
+        })
+    
+    return jsonify({'announcements': result})
+
+@bp.route("/api/announcements/<int:id>/read", methods=['POST'])
+@login_required
+def mark_announcement_read(id):
+    a = Announcement.query.get_or_404(id)
+    
+    if a.audience != 'all' and current_user.role != 'admin':
+        return jsonify({'error': '无权限'}), 403
+    
+    existing = AnnouncementRead.query.filter_by(
+        announcement_id=id,
+        user_id=current_user.id
+    ).first()
+    
+    if not existing:
+        read_record = AnnouncementRead(
+            announcement_id=id,
+            user_id=current_user.id,
+            username=current_user.username
+        )
+        db.session.add(read_record)
+        db.session.commit()
+    
+    return jsonify({'status': 'marked'})
+
+@bp.route("/api/announcements", methods=['GET'])
+@login_required
+def get_announcements_history():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    category = request.args.get('category', '')
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+    
+    query = Announcement.query.filter(Announcement.status == 'published')
+    
+    if current_user.role != 'admin':
+        query = query.filter(Announcement.audience == 'all')
+    
+    if category:
+        query = query.filter(Announcement.category == category)
+    
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+            query = query.filter(Announcement.created_at >= start_dt)
+        except ValueError:
+            pass
+    
+    if end_date:
+        try:
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+            end_dt = end_dt + timedelta(days=1)
+            query = query.filter(Announcement.created_at < end_dt)
+        except ValueError:
+            pass
+    
+    read_ids = [r.announcement_id for r in AnnouncementRead.query.filter_by(user_id=current_user.id).all()]
+    
+    query = query.order_by(
+        Announcement.is_pinned.desc(),
+        Announcement.pin_priority.desc(),
+        Announcement.created_at.desc()
+    )
+    
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    
+    result = []
+    for a in pagination.items:
+        result.append({
+            'id': a.id,
+            'title': a.title,
+            'category': a.category,
+            'is_pinned': a.is_pinned,
+            'require_confirmation': a.require_confirmation,
+            'created_by': a.created_by_name,
+            'created_at': a.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'effective_at': a.effective_at.strftime('%Y-%m-%d %H:%M:%S') if a.effective_at else '',
+            'expire_at': a.expire_at.strftime('%Y-%m-%d %H:%M:%S') if a.expire_at else '',
+            'is_read': a.id in read_ids
+        })
+    
+    return jsonify({
+        'announcements': result,
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page,
+        'per_page': per_page
+    })
+
+@bp.route("/api/announcements/<int:id>", methods=['GET'])
+@login_required
+def get_announcement_detail(id):
+    a = Announcement.query.get_or_404(id)
+    
+    if a.audience != 'all' and current_user.role != 'admin':
+        return jsonify({'error': '无权限'}), 403
+    
+    is_read = AnnouncementRead.query.filter_by(
+        announcement_id=id,
+        user_id=current_user.id
+    ).first() is not None
+    
+    return jsonify({
+        'id': a.id,
+        'title': a.title,
+        'content': a.content,
+        'category': a.category,
+        'is_pinned': a.is_pinned,
+        'require_confirmation': a.require_confirmation,
+        'created_by': a.created_by_name,
+        'created_at': a.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'effective_at': a.effective_at.strftime('%Y-%m-%d %H:%M:%S') if a.effective_at else '',
+        'expire_at': a.expire_at.strftime('%Y-%m-%d %H:%M:%S') if a.expire_at else '',
+        'is_read': is_read
     })
