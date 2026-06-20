@@ -306,7 +306,25 @@
         tbody.innerHTML = rows;
     }
 
-    window.addEventListener('load', init);
+    async function preselectFromSidebar() {
+        var carId = sessionStorage.getItem('preselectCompareCar');
+        if (!carId) return;
+        sessionStorage.removeItem('preselectCompareCar');
+        try {
+            var res = await fetch('/api/compare/search?q=');
+            var cars = await res.json();
+            var target = cars.find(function(c) { return c.id === parseInt(carId); });
+            if (target) {
+                addCar(target);
+                showToast('已预选 ' + target.brand + ' ' + target.model_name, 'info');
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    window.addEventListener('load', function() {
+        init();
+        setTimeout(preselectFromSidebar, 300);
+    });
     window.addEventListener('resize', function() {
         if (radarChart) radarChart.resize();
     });

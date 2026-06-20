@@ -21,20 +21,23 @@ function initCharts() {
     // Interaction Events
     if (charts.barChart) {
         charts.barChart.on('click', function (params) {
-            // Drill down: If brand filter is empty, and user clicks a model, 
-            // maybe we extract the brand or just set the brand filter to that specific brand.
-            // Simplified: Filter everything by this brand
-            const brandSelect = document.getElementById('brandFilter');
-            // Check if name is a brand or a specific model. 
-            // In our current API, labels are model names. We might need brand info.
-            // For this version: just toast and filter by brand if it matches known brands.
-            const brands = ['特斯拉', '比亚迪', '蔚来', '小鹏'];
-            if (brands.includes(params.name)) {
-                brandSelect.value = params.name;
-                refreshCharts();
-            } else {
-                // It's a model name. We can find the brand? 
-                // Let's assume user wants to filter by this specific selection.
+            if (params.componentType === 'series' && params.name) {
+                const brands = ['特斯拉', '比亚迪', '蔚来', '小鹏'];
+                if (brands.includes(params.name)) {
+                    const brandSelect = document.getElementById('brandFilter');
+                    brandSelect.value = params.name;
+                    refreshCharts();
+                } else {
+                    openCarSidebar(params.name);
+                }
+            }
+        });
+    }
+
+    if (charts.scatterChart) {
+        charts.scatterChart.on('click', function (params) {
+            if (params.data && params.data[2]) {
+                openCarSidebar(params.data[2]);
             }
         });
     }
@@ -76,12 +79,15 @@ async function loadBarChart() {
     if (tbody) {
         tbody.innerHTML = data.models.map((m, i) => `
             <tr>
-                <td style="color: #fff; font-weight: 500;">${m}</td>
+                <td style="color: #fff; font-weight: 500;"><span class="model-link" data-model="${m}">${m}</span></td>
                 <td>${data.range[i]} km</td>
                 <td>${data.price[i]} 万</td>
                 <td>${data.power[i]}</td>
             </tr>
         `).join('');
+        tbody.querySelectorAll('.model-link').forEach(el => {
+            el.onclick = () => openCarSidebar(el.dataset.model);
+        });
     }
 
     charts.barChart.setOption({
@@ -579,4 +585,567 @@ window.addEventListener('load', () => {
     if (bannerEl) {
         loadActiveAnnouncements();
     }
+});
+
+// ========== Car Detail Sidebar ==========
+let sidebarState = {
+    currentModel: null,
+    pinned: false,
+    charts: {},
+    activeTab: 'overview',
+    currentCarId: null,
+    currentModelName: null
+};
+
+function openCarSidebar(modelName) {
+    sidebarState.currentModel = modelName;
+    const overlay = document.getElementById('carSidebarOverlay');
+    if (!overlay) return;
+
+    if (sidebarState.pinned) {
+        overlay.classList.remove('pinned');
+        sidebarState.pinned = false;
+        updatePinButton();
+    }
+    overlay.style.display = 'flex';
+    document.getElementById('sidebarInvisible').style.display = 'none';
+
+    loadCarDetail(modelName);
+    loadCarRegionSales(modelName);
+    loadCarQuarterly(modelName);
+    loadCarCompareAvg(modelName);
+    loadSimilarCars(modelName);
+
+    switchSidebarTab('overview');
+}
+
+function closeCarSidebar() {
+    if (sidebarState.pinned) return;
+    const overlay = document.getElementById('carSidebarOverlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+        Object.values(sidebarState.charts).forEach(c => {
+            if (c && c.dispose) c.dispose();
+        });
+        sidebarState.charts = {};
+    }
+}
+
+function updatePinButton() {
+    const btn = document.getElementById('btnPinSidebar');
+    if (!btn) return;
+    if (sidebarState.pinned) {
+        btn.classList.add('active');
+        btn.querySelector('.action-text').textContent = '已固定';
+    } else {
+        btn.classList.remove('active');
+        btn.querySelector('.action-text').textContent = '固定';
+    }
+}
+
+function switchSidebarTab(tabName) {
+    sidebarState.activeTab = tabName;
+    document.querySelectorAll('.car-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabName);
+    });
+    document.querySelectorAll('.car-tab-pane').forEach(pane => {
+        pane.classList.toggle('active', pane.id === `tab-${tabName}`);
+    });
+    setTimeout(() => {
+        Object.values(sidebarState.charts).forEach(c => {
+            if (c && c.resize) c.resize();
+        });
+    }, 50);
+}
+
+async function loadCarDetail(modelName) {
+    try {
+        const res = await fetch(`/api/car/detail/${encodeURIComponent(modelName)}`);
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        sidebarState.currentCarId = data.id;
+        sidebarState.currentModelName = data.model_name;
+
+        document.getElementById('sidebarCarName').textContent = data.model_name;
+        document.getElementById('sidebarCarSub').textContent = `${data.brand} · ${data.category}`;
+        const badge = document.getElementById('sidebarBrandBadge');
+        badge.textContent = data.brand.charAt(0);
+
+        document.getElementById('ovBrand').textContent = data.brand;
+        document.getElementById('ovCategory').textContent = data.category;
+        document.getElementById('ovPrice').textContent = data.price;
+        document.getElementById('ovRange').textContent = data.range_km;
+        document.getElementById('ovPower').textContent = data.power_consumption;
+        document.getElementById('ovWeight').textContent = data.weight_kg;
+
+        renderRankList('rankBrand', [
+            { label: '价格排名', rank: data.ranks.rank_in_brand_price, total: data.ranks.brand_total, pct: data.ranks.pct_brand_price, lowerBetter: true },
+            { label: '续航排名', rank: data.ranks.rank_in_brand_range, total: data.ranks.brand_total, pct: data.ranks.pct_brand_range, lowerBetter: false },
+            { label: '电耗排名', rank: data.ranks.rank_in_brand_power, total: data.ranks.brand_total, pct: data.ranks.pct_brand_power, lowerBetter: true }
+        ]);
+
+        renderRankList('rankSegment', [
+            { label: '价格排名', rank: data.ranks.rank_in_segment_price, total: data.ranks.segment_total, pct: data.ranks.pct_segment_price, lowerBetter: true },
+            { label: '续航排名', rank: data.ranks.rank_in_segment_range, total: data.ranks.segment_total, pct: data.ranks.pct_segment_range, lowerBetter: false },
+            { label: '电耗排名', rank: data.ranks.rank_in_segment_power, total: data.ranks.segment_total, pct: data.ranks.pct_segment_power, lowerBetter: true }
+        ]);
+    } catch (e) {
+        console.error('Load detail error:', e);
+        showToast('加载车型详情失败', 'danger');
+    }
+}
+
+function getPctClass(pct) {
+    if (pct >= 60) return 'good';
+    if (pct >= 35) return 'mid';
+    return 'bad';
+}
+
+function getPctBarClass(pct) {
+    if (pct >= 60) return 'high';
+    if (pct >= 35) return '';
+    return 'low';
+}
+
+function renderRankList(containerId, items) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = items.map(item => {
+        const pctClass = getPctClass(item.pct);
+        const barClass = getPctBarClass(item.pct);
+        return `
+            <div class="rank-item">
+                <div class="rank-item-left">
+                    <span class="rank-label">${item.label}</span>
+                </div>
+                <div class="rank-item-right">
+                    <span class="rank-position">第${item.rank}</span>
+                    <span class="rank-total">/ ${item.total}</span>
+                    <div class="rank-progress">
+                        <div class="rank-progress-fill ${barClass}" style="width: ${Math.max(5, item.pct)}%"></div>
+                    </div>
+                    <span class="rank-percentile ${pctClass}">${item.pct}%</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+let sidebarMapGeoCache = null;
+
+async function loadCarRegionSales(modelName) {
+    try {
+        const res = await fetch(`/api/car/region_sales/${encodeURIComponent(modelName)}`);
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        renderRegionMap(data.regions);
+        renderRegionBars(data.regions);
+    } catch (e) {
+        console.error('Load region sales error:', e);
+    }
+}
+
+async function renderRegionMap(regions) {
+    const chartEl = document.getElementById('regionMapChart');
+    if (!chartEl) return;
+    if (sidebarState.charts.regionMap) {
+        sidebarState.charts.regionMap.dispose();
+    }
+    const chart = echarts.init(chartEl);
+    sidebarState.charts.regionMap = chart;
+
+    try {
+        const mapUrl = 'https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json';
+        if (!sidebarMapGeoCache) {
+            const mapRes = await fetch(mapUrl);
+            sidebarMapGeoCache = await mapRes.json();
+            echarts.registerMap('china_mini', sidebarMapGeoCache);
+        }
+    } catch (e) {
+        console.error('Map loading failed:', e);
+    }
+
+    const vals = regions.map(r => r.value).filter(v => v > 0);
+    const maxVal = vals.length > 0 ? Math.max(...vals) : 100;
+
+    chart.setOption({
+        tooltip: {
+            trigger: 'item',
+            backgroundColor: '#1e293b',
+            borderColor: '#334155',
+            textStyle: { color: '#fff', fontSize: 12 },
+            formatter: p => `${p.name}<br/>销量: ${p.value || 0} 辆`
+        },
+        visualMap: {
+            min: 0, max: maxVal > 0 ? maxVal : 100,
+            show: false,
+            inRange: { color: ['#1e293b', '#38bdf8', '#a78bfa'] }
+        },
+        series: [{
+            type: 'map',
+            mapType: 'china_mini',
+            roam: false,
+            zoom: 1.2,
+            label: { show: false },
+            emphasis: {
+                label: { show: true, color: '#fff', fontSize: 10 },
+                itemStyle: { areaColor: '#a78bfa' }
+            },
+            itemStyle: {
+                borderColor: 'rgba(255,255,255,0.1)',
+                borderWidth: 0.5
+            },
+            data: regions
+        }]
+    });
+}
+
+function renderRegionBars(regions) {
+    const container = document.getElementById('regionBarChart');
+    if (!container) return;
+    const sorted = [...regions].sort((a, b) => b.value - a.value).slice(0, 15);
+    const maxVal = sorted.length > 0 ? sorted[0].value : 1;
+
+    container.innerHTML = sorted.map(r => {
+        const width = maxVal > 0 ? Math.max(2, (r.value / maxVal) * 100) : 2;
+        return `
+            <div class="region-bar-item" data-region="${r.name}">
+                <div class="region-bar-name">${r.name.replace(/市$|省$|壮族自治区$|回族自治区$|维吾尔自治区$|自治区$|特别行政区$/, '')}</div>
+                <div class="region-bar-track">
+                    <div class="region-bar-fill" style="width: ${width}%"></div>
+                </div>
+                <div class="region-bar-value">${r.value.toLocaleString()} 辆</div>
+            </div>
+        `;
+    }).join('');
+
+    container.querySelectorAll('.region-bar-item').forEach(item => {
+        item.onmouseenter = () => {
+            highlightRegionOnMap(item.dataset.region, true);
+            container.querySelectorAll('.region-bar-item').forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
+        };
+        item.onmouseleave = () => {
+            highlightRegionOnMap(item.dataset.region, false);
+            item.classList.remove('active');
+        };
+    });
+}
+
+function highlightRegionOnMap(regionName, highlight) {
+    if (!sidebarState.charts.regionMap) return;
+    sidebarState.charts.regionMap.dispatchAction({
+        type: highlight ? 'highlight' : 'downplay',
+        name: regionName
+    });
+}
+
+async function loadCarQuarterly(modelName) {
+    try {
+        const res = await fetch(`/api/car/quarterly/${encodeURIComponent(modelName)}`);
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        renderQuarterlyChart(data);
+    } catch (e) {
+        console.error('Load quarterly error:', e);
+    }
+}
+
+function renderQuarterlyChart(data) {
+    const chartEl = document.getElementById('trendLineChart');
+    if (!chartEl) return;
+    if (sidebarState.charts.trend) {
+        sidebarState.charts.trend.dispose();
+    }
+    const chart = echarts.init(chartEl);
+    sidebarState.charts.trend = chart;
+
+    const markPoints = [];
+    data.changes.forEach((c, i) => {
+        if (c && i > 0) {
+            markPoints.push({
+                name: data.periods[i],
+                coord: [i, data.quantities[i]],
+                value: `${c.up ? '↑' : '↓'}${Math.abs(c.pct)}%`,
+                symbolSize: 0,
+                label: {
+                    show: true,
+                    position: c.up ? 'top' : 'bottom',
+                    color: c.up ? '#10b981' : '#f43f5e',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    formatter: `${c.up ? '+' : ''}${c.pct}%`
+                }
+            });
+        }
+    });
+
+    chart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            backgroundColor: '#1e293b',
+            borderColor: '#334155',
+            textStyle: { color: '#fff', fontSize: 12 },
+            formatter: params => {
+                const idx = params[0].dataIndex;
+                const change = data.changes[idx];
+                let html = `<div style="font-weight:600;margin-bottom:4px;">${data.periods[idx]}</div>`;
+                html += `<div>销量: <b>${data.quantities[idx].toLocaleString()}</b> 辆</div>`;
+                if (change) {
+                    const color = change.up ? '#10b981' : '#f43f5e';
+                    const arrow = change.up ? '↑' : '↓';
+                    html += `<div style="color:${color};margin-top:4px;">环比 ${arrow} ${Math.abs(change.pct)}%</div>`;
+                } else if (idx === 0) {
+                    html += `<div style="color:#94a3b8;margin-top:4px;">基期</div>`;
+                }
+                return html;
+            }
+        },
+        grid: { left: 50, right: 40, top: 50, bottom: 40 },
+        xAxis: {
+            type: 'category',
+            data: data.periods,
+            axisLabel: { color: '#94a3b8', fontSize: 11 },
+            axisLine: { lineStyle: { color: '#334155' } }
+        },
+        yAxis: {
+            type: 'value',
+            axisLabel: { color: '#94a3b8', fontSize: 11 },
+            splitLine: { lineStyle: { color: '#334155' } }
+        },
+        series: [{
+            name: '销量',
+            type: 'line',
+            data: data.quantities,
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 8,
+            lineStyle: { width: 3, color: '#38bdf8' },
+            itemStyle: { color: '#38bdf8', borderColor: '#fff', borderWidth: 2 },
+            areaStyle: {
+                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                    { offset: 0, color: 'rgba(56, 189, 248, 0.35)' },
+                    { offset: 1, color: 'rgba(56, 189, 248, 0.02)' }
+                ])
+            },
+            markPoint: {
+                data: markPoints,
+                symbol: 'none'
+            }
+        }]
+    });
+}
+
+async function loadCarCompareAvg(modelName) {
+    try {
+        const res = await fetch(`/api/car/compare_avg/${encodeURIComponent(modelName)}`);
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        document.getElementById('compareAvgTitle').textContent = `${data.category}车型均值对比`;
+        document.getElementById('compareAvgCount').textContent = `样本: ${data.total_in_category} 款`;
+        renderCompareBars(data.dims);
+    } catch (e) {
+        console.error('Load compare error:', e);
+    }
+}
+
+function renderCompareBars(dims) {
+    const container = document.getElementById('compareBarsContainer');
+    if (!container) return;
+
+    container.innerHTML = dims.map(dim => {
+        const maxVal = Math.max(dim.car, dim.avg) * 1.1;
+        const carWidth = maxVal > 0 ? (dim.car / maxVal * 100) : 0;
+        const avgWidth = maxVal > 0 ? (dim.avg / maxVal * 100) : 0;
+        const diffSign = dim.diff > 0 ? '+' : '';
+        const pctSign = dim.pct > 0 ? '+' : '';
+        let badgeClass = 'equal';
+        let badgeText = '持平';
+        if (dim.better) {
+            badgeClass = 'better';
+            badgeText = `优于均值 ${pctSign}${dim.pct}%`;
+        } else if (dim.diff !== 0) {
+            badgeClass = 'worse';
+            badgeText = `落后均值 ${Math.abs(dim.pct)}%`;
+        }
+
+        return `
+            <div class="compare-bar-group">
+                <div class="compare-bar-group-header">
+                    <div class="compare-bar-name">${dim.name} <span style="color:#94a3b8;font-weight:400;">(${dim.unit})</span></div>
+                    <div class="compare-bar-badge ${badgeClass}">${badgeText}</div>
+                </div>
+                <div class="compare-bars-dual">
+                    <div class="compare-bar-row car-row">
+                        <div class="compare-bar-label">当前</div>
+                        <div class="compare-bar-track">
+                            <div class="compare-bar-fill car" style="width: ${Math.max(2, carWidth)}%"></div>
+                        </div>
+                        <div class="compare-bar-value" style="color: var(--accent-color);">${dim.car}</div>
+                    </div>
+                    <div class="compare-bar-row">
+                        <div class="compare-bar-label">均值</div>
+                        <div class="compare-bar-track">
+                            <div class="compare-bar-fill avg" style="width: ${Math.max(2, avgWidth)}%"></div>
+                        </div>
+                        <div class="compare-bar-value">${dim.avg}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function loadSimilarCars(modelName) {
+    try {
+        const res = await fetch(`/api/car/similar/${encodeURIComponent(modelName)}`);
+        if (!res.ok) throw new Error('Failed');
+        const cars = await res.json();
+        renderSimilarCars(cars);
+    } catch (e) {
+        console.error('Load similar cars error:', e);
+    }
+}
+
+function renderSimilarCars(cars) {
+    const container = document.getElementById('similarCars');
+    if (!container) return;
+    if (cars.length === 0) {
+        container.innerHTML = '<div style="grid-column: span 3; text-align: center; padding: 16px; color: var(--text-secondary); font-size: 12px;">暂无相近替代车型</div>';
+        return;
+    }
+    container.innerHTML = cars.map(c => `
+        <div class="similar-card" data-model="${c.model_name}">
+            <div class="similar-brand">${c.brand}</div>
+            <div class="similar-name">${c.model_name}</div>
+            <div class="similar-meta">
+                <span class="price">${c.price} 万</span>
+                <span>${c.range_km} km · ${c.category}</span>
+            </div>
+        </div>
+    `).join('');
+    container.querySelectorAll('.similar-card').forEach(card => {
+        card.onclick = () => {
+            openCarSidebar(card.dataset.model);
+        };
+    });
+}
+
+function checkSidebarVisibilityInFilters() {
+    if (!sidebarState.pinned || !sidebarState.currentModelName) return;
+    const params = getFilterParams();
+    fetch(`/api/chart/bar${params}`)
+        .then(r => r.json())
+        .then(data => {
+            const visible = data.models.includes(sidebarState.currentModelName);
+            const tip = document.getElementById('sidebarInvisible');
+            if (!visible) {
+                tip.style.display = 'flex';
+            } else {
+                tip.style.display = 'none';
+            }
+        })
+        .catch(() => {});
+}
+
+// ========== Sidebar Event Bindings ==========
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.car-tab').forEach(btn => {
+        btn.onclick = () => switchSidebarTab(btn.dataset.tab);
+    });
+
+    const closeBtn = document.getElementById('btnCloseSidebar');
+    if (closeBtn) closeBtn.onclick = closeCarSidebar;
+
+    const overlay = document.getElementById('carSidebarOverlay');
+    if (overlay) {
+        overlay.onclick = e => {
+            if (e.target === overlay && !sidebarState.pinned) {
+                closeCarSidebar();
+            }
+        };
+    }
+
+    const addCompareBtn = document.getElementById('btnAddCompare');
+    if (addCompareBtn) {
+        addCompareBtn.onclick = () => {
+            if (!sidebarState.currentCarId) {
+                showToast('请先选择车型', 'warning');
+                return;
+            }
+            sessionStorage.setItem('preselectCompareCar', sidebarState.currentCarId.toString());
+            window.location.href = '/compare';
+        };
+    }
+
+    const shareBtn = document.getElementById('btnShareLink');
+    if (shareBtn) {
+        shareBtn.onclick = () => {
+            if (!sidebarState.currentModelName) return;
+            const url = `${window.location.origin}${window.location.pathname}?car=${encodeURIComponent(sidebarState.currentModelName)}`;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(() => {
+                    showToast('分享链接已复制到剪贴板', 'success');
+                }).catch(() => fallbackCopy(url));
+            } else {
+                fallbackCopy(url);
+            }
+        };
+    }
+
+    const pinBtn = document.getElementById('btnPinSidebar');
+    if (pinBtn) {
+        pinBtn.onclick = () => {
+            sidebarState.pinned = !sidebarState.pinned;
+            const overlay = document.getElementById('carSidebarOverlay');
+            if (sidebarState.pinned) {
+                overlay.classList.add('pinned');
+                showToast('侧栏已固定，可继续操作左侧看板', 'info');
+            } else {
+                overlay.classList.remove('pinned');
+            }
+            updatePinButton();
+        };
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const carFromUrl = urlParams.get('car');
+    if (carFromUrl) {
+        window.addEventListener('load', () => {
+            setTimeout(() => openCarSidebar(decodeURIComponent(carFromUrl)), 500);
+        });
+    }
+});
+
+function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        document.execCommand('copy');
+        showToast('分享链接已复制到剪贴板', 'success');
+    } catch (e) {
+        showToast(`复制失败，请手动复制: ${text}`, 'warning');
+    }
+    document.body.removeChild(ta);
+}
+
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+        const overlay = document.getElementById('carSidebarOverlay');
+        if (overlay && overlay.style.display === 'flex' && !sidebarState.pinned) {
+            closeCarSidebar();
+        }
+    }
+});
+
+window.addEventListener('load', () => {
+    const originalRefresh = window.refreshCharts;
+    window.refreshCharts = function () {
+        if (originalRefresh) originalRefresh.apply(this, arguments);
+        setTimeout(checkSidebarVisibilityInFilters, 300);
+    };
 });

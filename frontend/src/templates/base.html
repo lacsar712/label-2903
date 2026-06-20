@@ -93,6 +93,118 @@
         </div>
     </div>
     <div id="toastContainer" class="toast-container"></div>
+
+    <div id="carSidebarOverlay" class="car-sidebar-overlay" style="display: none;">
+        <div id="carSidebar" class="car-sidebar">
+            <div class="car-sidebar-header">
+                <div class="car-sidebar-title">
+                    <div class="car-brand-badge" id="sidebarBrandBadge"></div>
+                    <div>
+                        <div class="car-sidebar-name" id="sidebarCarName">--</div>
+                        <div class="car-sidebar-sub" id="sidebarCarSub">--</div>
+                    </div>
+                </div>
+                <div class="car-sidebar-actions">
+                    <button class="sidebar-action-btn" id="btnAddCompare" title="加入对标">
+                        <span class="action-icon">⚖️</span>
+                        <span class="action-text">加入对标</span>
+                    </button>
+                    <button class="sidebar-action-btn" id="btnShareLink" title="复制分享链接">
+                        <span class="action-icon">🔗</span>
+                        <span class="action-text">分享</span>
+                    </button>
+                    <button class="sidebar-action-btn" id="btnPinSidebar" title="固定侧栏">
+                        <span class="action-icon">📌</span>
+                        <span class="action-text">固定</span>
+                    </button>
+                    <button class="sidebar-close-btn" id="btnCloseSidebar" title="关闭">×</button>
+                </div>
+            </div>
+
+            <div id="sidebarInvisible" class="sidebar-invisible-tip" style="display: none;">
+                当前筛选条件下该车型不可见
+            </div>
+
+            <div class="car-sidebar-tabs">
+                <button class="car-tab active" data-tab="overview">参数概览</button>
+                <button class="car-tab" data-tab="region">区域销量</button>
+                <button class="car-tab" data-tab="trend">季度趋势</button>
+                <button class="car-tab" data-tab="compare">同类对比</button>
+            </div>
+
+            <div class="car-sidebar-content">
+                <div class="car-tab-pane active" id="tab-overview">
+                    <div class="overview-section">
+                        <div class="section-title">核心参数</div>
+                        <div class="param-grid">
+                            <div class="param-card">
+                                <div class="param-label">品牌</div>
+                                <div class="param-value" id="ovBrand">--</div>
+                            </div>
+                            <div class="param-card">
+                                <div class="param-label">动力类型</div>
+                                <div class="param-value" id="ovCategory">--</div>
+                            </div>
+                            <div class="param-card highlight">
+                                <div class="param-label">价格</div>
+                                <div class="param-value"><span id="ovPrice">--</span> 万</div>
+                            </div>
+                            <div class="param-card highlight">
+                                <div class="param-label">续航里程</div>
+                                <div class="param-value"><span id="ovRange">--</span> km</div>
+                            </div>
+                            <div class="param-card">
+                                <div class="param-label">百公里电耗</div>
+                                <div class="param-value"><span id="ovPower">--</span> kWh</div>
+                            </div>
+                            <div class="param-card">
+                                <div class="param-label">车身重量</div>
+                                <div class="param-value"><span id="ovWeight">--</span> kg</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="overview-section">
+                        <div class="section-title">同品牌排名</div>
+                        <div class="rank-list" id="rankBrand">
+                        </div>
+                    </div>
+
+                    <div class="overview-section">
+                        <div class="section-title">同价位段排名 (±2万)</div>
+                        <div class="rank-list" id="rankSegment">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="car-tab-pane" id="tab-region">
+                    <div class="region-chart-mini" id="regionMapChart"></div>
+                    <div class="section-title" style="margin-top: 20px; margin-bottom: 12px;">分省销量排行</div>
+                    <div class="region-bars" id="regionBarChart"></div>
+                </div>
+
+                <div class="car-tab-pane" id="tab-trend">
+                    <div class="trend-chart" id="trendLineChart"></div>
+                </div>
+
+                <div class="car-tab-pane" id="tab-compare">
+                    <div class="compare-avg-header">
+                        <div class="compare-avg-title" id="compareAvgTitle">同动力类型均值对比</div>
+                        <div class="compare-avg-count" id="compareAvgCount">--</div>
+                    </div>
+                    <div class="compare-bars-container" id="compareBarsContainer">
+                    </div>
+                </div>
+            </div>
+
+            <div class="car-sidebar-similar">
+                <div class="similar-title">参数相近替代车型</div>
+                <div class="similar-cars" id="similarCars">
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 

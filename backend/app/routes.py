@@ -1099,3 +1099,192 @@ def get_announcement_detail(id):
         'expire_at': a.expire_at.strftime('%Y-%m-%d %H:%M:%S') if a.expire_at else '',
         'is_read': is_read
     })
+
+# --- Car Detail Sidebar APIs ---
+
+def _get_car_by_name(model_name):
+    return CarModel.query.filter_by(model_name=model_name).first()
+
+@bp.route("/api/car/detail/<path:model_name>")
+@login_required
+def car_detail(model_name):
+    car = _get_car_by_name(model_name)
+    if not car:
+        return jsonify({'error': '车型不存在'}), 404
+
+    all_cars = CarModel.query.all()
+    brand_cars = [c for c in all_cars if c.brand == car.brand]
+
+    price_min, price_max = car.price - 2, car.price + 2
+    price_segment_cars = [c for c in all_cars if price_min <= c.price <= price_max]
+
+    def calc_percentile(lst, val, lower_better=False):
+        total = len(lst)
+        if total <= 1:
+            return 50
+        if lower_better:
+            better = sum(1 for v in lst if v < val)
+        else:
+            better = sum(1 for v in lst if v > val)
+        equal = sum(1 for v in lst if v == val)
+        return round((better + equal * 0.5) / total * 100, 1)
+
+    return jsonify({
+        'id': car.id,
+        'brand': car.brand,
+        'model_name': car.model_name,
+        'category': car.category,
+        'price': car.price,
+        'range_km': car.range_km,
+        'power_consumption': car.power_consumption,
+        'weight_kg': car.weight_kg,
+        'ranks': {
+            'brand_total': len(brand_cars),
+            'rank_in_brand_price': sorted(brand_cars, key=lambda c: c.price).index(car) + 1,
+            'rank_in_brand_range': sorted(brand_cars, key=lambda c: c.range_km, reverse=True).index(car) + 1,
+            'rank_in_brand_power': sorted(brand_cars, key=lambda c: c.power_consumption).index(car) + 1,
+            'segment_total': len(price_segment_cars),
+            'rank_in_segment_price': sorted(price_segment_cars, key=lambda c: c.price).index(car) + 1 if price_segment_cars else 0,
+            'rank_in_segment_range': sorted(price_segment_cars, key=lambda c: c.range_km, reverse=True).index(car) + 1 if price_segment_cars else 0,
+            'rank_in_segment_power': sorted(price_segment_cars, key=lambda c: c.power_consumption).index(car) + 1 if price_segment_cars else 0,
+            'pct_brand_price': calc_percentile([c.price for c in brand_cars], car.price, lower_better=True),
+            'pct_brand_range': calc_percentile([c.range_km for c in brand_cars], car.range_km),
+            'pct_brand_power': calc_percentile([c.power_consumption for c in brand_cars], car.power_consumption, lower_better=True),
+            'pct_segment_price': calc_percentile([c.price for c in price_segment_cars], car.price, lower_better=True),
+            'pct_segment_range': calc_percentile([c.range_km for c in price_segment_cars], car.range_km),
+            'pct_segment_power': calc_percentile([c.power_consumption for c in price_segment_cars], car.power_consumption, lower_better=True)
+        }
+    })
+
+@bp.route("/api/car/region_sales/<path:model_name>")
+@login_required
+def car_region_sales(model_name):
+    car = _get_car_by_name(model_name)
+    if not car:
+        return jsonify({'error': '车型不存在'}), 404
+
+    sales = db.session.query(
+        SalesData.region, func.sum(SalesData.quantity)
+    ).filter_by(car_model_id=car.id).group_by(SalesData.region).all()
+
+    total = sum(int(s[1]) for s in sales)
+
+    return jsonify({
+        'total': total,
+        'regions': [{'name': s[0], 'value': int(s[1])} for s in sales]
+    })
+
+@bp.route("/api/car/quarterly/<path:model_name>")
+@login_required
+def car_quarterly(model_name):
+    car = _get_car_by_name(model_name)
+    if not car:
+        return jsonify({'error': '车型不存在'}), 404
+
+    sales = db.session.query(
+        SalesData.period, func.sum(SalesData.quantity)
+    ).filter_by(car_model_id=car.id).group_by(SalesData.period).order_by(SalesData.period).all()
+
+    periods = [s[0] for s in sales]
+    quantities = [int(s[1]) for s in sales]
+
+    changes = []
+    for i in range(len(quantities)):
+        if i == 0:
+            changes.append(None)
+        else:
+            prev = quantities[i - 1]
+            cur = quantities[i]
+            if prev > 0:
+                pct = round((cur - prev) / prev * 100, 1)
+                changes.append({
+                    'pct': pct,
+                    'up': pct >= 0
+                })
+            else:
+                changes.append(None)
+
+    return jsonify({
+        'periods': periods,
+        'quantities': quantities,
+        'changes': changes
+    })
+
+@bp.route("/api/car/compare_avg/<path:model_name>")
+@login_required
+def car_compare_avg(model_name):
+    car = _get_car_by_name(model_name)
+    if not car:
+        return jsonify({'error': '车型不存在'}), 404
+
+    same_cat_cars = [c for c in CarModel.query.all() if c.category == car.category]
+
+    def avg(lst):
+        return round(sum(lst) / len(lst), 1) if lst else 0
+
+    avg_price = avg([c.price for c in same_cat_cars])
+    avg_range = avg([c.range_km for c in same_cat_cars])
+    avg_power = avg([c.power_consumption for c in same_cat_cars])
+    avg_weight = avg([c.weight_kg for c in same_cat_cars])
+
+    dims = [
+        {'name': '价格', 'unit': '万元', 'car': car.price, 'avg': avg_price, 'lower_better': True},
+        {'name': '续航', 'unit': 'km', 'car': car.range_km, 'avg': avg_range, 'lower_better': False},
+        {'name': '电耗', 'unit': 'kWh/100km', 'car': car.power_consumption, 'avg': avg_power, 'lower_better': True},
+        {'name': '车重', 'unit': 'kg', 'car': car.weight_kg, 'avg': avg_weight, 'lower_better': True}
+    ]
+
+    result = []
+    for d in dims:
+        diff = round(d['car'] - d['avg'], 1)
+        better = (diff < 0) if d['lower_better'] else (diff > 0)
+        if d['avg'] > 0:
+            if d['lower_better']:
+                pct = round((d['avg'] - d['car']) / d['avg'] * 100, 1)
+            else:
+                pct = round((d['car'] - d['avg']) / d['avg'] * 100, 1)
+        else:
+            pct = 0
+        result.append({
+            'name': d['name'],
+            'unit': d['unit'],
+            'car': d['car'],
+            'avg': d['avg'],
+            'diff': diff,
+            'pct': pct,
+            'better': better
+        })
+
+    return jsonify({
+        'category': car.category,
+        'total_in_category': len(same_cat_cars),
+        'dims': result
+    })
+
+@bp.route("/api/car/similar/<path:model_name>")
+@login_required
+def car_similar(model_name):
+    car = _get_car_by_name(model_name)
+    if not car:
+        return jsonify({'error': '车型不存在'}), 404
+
+    all_cars = CarModel.query.filter(CarModel.id != car.id).all()
+
+    def similarity_score(c):
+        price_diff = abs(c.price - car.price) * 2
+        range_diff = abs(c.range_km - car.range_km) / 100
+        power_diff = abs(c.power_consumption - car.power_consumption) * 5
+        cat_bonus = 0 if c.category == car.category else 50
+        return price_diff + range_diff + power_diff + cat_bonus
+
+    similar = sorted(all_cars, key=similarity_score)[:3]
+
+    return jsonify([{
+        'id': c.id,
+        'brand': c.brand,
+        'model_name': c.model_name,
+        'price': c.price,
+        'range_km': c.range_km,
+        'power_consumption': c.power_consumption,
+        'category': c.category
+    } for c in similar])
