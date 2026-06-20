@@ -68,8 +68,38 @@
         </select>
     </div>
     <button onclick="refreshCharts()" class="btn">加载数据</button>
+    <div class="export-wrapper" style="margin-left: auto;">
+        <button onclick="toggleExportPanel()" class="btn btn-export">
+            <span style="margin-right: 6px;">⬇</span>导出数据
+        </button>
+        <div id="exportPanel" class="export-panel">
+            <div class="export-panel-header">
+                <h4>数据导出中心</h4>
+                <button class="export-close" onclick="toggleExportPanel()">&times;</button>
+            </div>
+            <div class="export-panel-body">
+                <p class="export-tip">导出结果与当前看板所见数据保持一致，方便线下汇报与二次分析。</p>
+                <div class="export-options">
+                    <div class="export-option" onclick="exportData('cars')">
+                        <div class="export-icon">📋</div>
+                        <div class="export-info">
+                            <div class="export-title">车型档案</div>
+                            <div class="export-desc">品牌、车型、动力类型、价格、续航、电耗、车重</div>
+                        </div>
+                    </div>
+                    <div class="export-option" onclick="exportData('sales')">
+                        <div class="export-icon">📊</div>
+                        <div class="export-info">
+                            <div class="export-title">销量汇总</div>
+                            <div class="export-desc">品牌、车型、区域销量、周期销量等详细数据</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
     {% if current_user.role == 'admin' %}
-    <button onclick="initDB()" class="btn btn-danger" style="margin-left: auto;">重置模拟数据</button>
+    <button onclick="initDB()" class="btn btn-danger">重置模拟数据</button>
     {% endif %}
 </div>
 

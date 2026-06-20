@@ -1,9 +1,12 @@
-from flask import Blueprint, render_template, url_for, flash, redirect, request, jsonify
+from flask import Blueprint, render_template, url_for, flash, redirect, request, jsonify, make_response
 from app import db, bcrypt
 from app.models import User, CarModel, SalesData, ChargingPile
 from flask_login import login_user, current_user, logout_user, login_required
 from sqlalchemy import func, or_
 import random
+import pandas as pd
+from io import BytesIO
+from datetime import datetime
 
 bp = Blueprint('main', __name__)
 
@@ -466,3 +469,121 @@ def admin_users():
     if current_user.role != 'admin':
         return redirect(url_for('main.home'))
     return render_template('admin_users.html')
+
+def _export_excel(df, filename_prefix):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='数据')
+    output.seek(0)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f'{filename_prefix}_{timestamp}.xlsx'
+    response = make_response(output.getvalue())
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    response.headers["Content-type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return response
+
+@bp.route("/api/export/cars")
+@login_required
+def export_cars():
+    query = CarModel.query
+    query = apply_car_filters(query)
+    
+    sort_field = request.args.get('sort_field', 'model_name')
+    sort_order = request.args.get('sort_order', 'asc')
+    
+    field_map = {
+        'model_name': CarModel.model_name,
+        'range': CarModel.range_km,
+        'price': CarModel.price,
+        'power': CarModel.power_consumption,
+    }
+    
+    if sort_field == 'sales':
+        query = db.session.query(
+            CarModel.id, CarModel.brand, CarModel.model_name,
+            CarModel.category, CarModel.price, CarModel.range_km,
+            CarModel.power_consumption, CarModel.weight_kg,
+            func.sum(SalesData.quantity).label('total_sales')
+        ).join(SalesData).group_by(CarModel.id)
+        query = apply_car_filters(query)
+        if sort_order == 'desc':
+            query = query.order_by(func.sum(SalesData.quantity).desc())
+        else:
+            query = query.order_by(func.sum(SalesData.quantity).asc())
+    else:
+        col = field_map.get(sort_field, CarModel.model_name)
+        if sort_order == 'desc':
+            query = query.order_by(col.desc())
+        else:
+            query = query.order_by(col.asc())
+    
+    cars = query.all()
+    
+    if sort_field == 'sales':
+        data = [{
+            '品牌': c.brand,
+            '车型': c.model_name,
+            '动力类型': c.category,
+            '价格(万元)': c.price,
+            '续航(km)': c.range_km,
+            '百公里电耗(kWh)': c.power_consumption,
+            '车重(kg)': c.weight_kg,
+            '总销量(辆)': c.total_sales if c.total_sales else 0
+        } for c in cars]
+    else:
+        data = [{
+            '品牌': c.brand,
+            '车型': c.model_name,
+            '动力类型': c.category,
+            '价格(万元)': c.price,
+            '续航(km)': c.range_km,
+            '百公里电耗(kWh)': c.power_consumption,
+            '车重(kg)': c.weight_kg
+        } for c in cars]
+    
+    df = pd.DataFrame(data)
+    return _export_excel(df, '车型档案')
+
+@bp.route("/api/export/sales")
+@login_required
+def export_sales():
+    query = db.session.query(
+        CarModel.brand, CarModel.model_name, CarModel.category,
+        CarModel.price, SalesData.region, SalesData.period,
+        SalesData.quantity
+    ).select_from(SalesData).join(CarModel)
+    
+    brand = request.args.get('brand')
+    city = request.args.get('city')
+    category_list = request.args.getlist('category[]')
+    price_min = request.args.get('price_min')
+    price_max = request.args.get('price_max')
+    range_min = request.args.get('range_min')
+    
+    if brand:
+        query = query.filter(CarModel.brand == brand)
+    if city:
+        query = query.filter(SalesData.region.like(f"%{city}%"))
+    if category_list:
+        query = query.filter(CarModel.category.in_(category_list))
+    if price_min:
+        query = query.filter(CarModel.price >= float(price_min))
+    if price_max:
+        query = query.filter(CarModel.price <= float(price_max))
+    if range_min:
+        query = query.filter(CarModel.range_km >= int(range_min))
+    
+    sales = query.order_by(CarModel.brand, CarModel.model_name, SalesData.period, SalesData.region).all()
+    
+    data = [{
+        '品牌': s.brand,
+        '车型': s.model_name,
+        '动力类型': s.category,
+        '价格(万元)': s.price,
+        '区域': s.region,
+        '周期': s.period,
+        '销量(辆)': s.quantity
+    } for s in sales]
+    
+    df = pd.DataFrame(data)
+    return _export_excel(df, '销量汇总')

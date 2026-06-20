@@ -303,3 +303,58 @@ window.addEventListener('load', () => {
 window.addEventListener('resize', () => {
     Object.values(charts).forEach(c => c.resize());
 });
+
+function toggleExportPanel() {
+    const panel = document.getElementById('exportPanel');
+    if (panel) {
+        panel.classList.toggle('show');
+    }
+}
+
+document.addEventListener('click', function(e) {
+    const exportWrapper = document.querySelector('.export-wrapper');
+    const exportPanel = document.getElementById('exportPanel');
+    if (exportWrapper && exportPanel && !exportWrapper.contains(e.target)) {
+        exportPanel.classList.remove('show');
+    }
+});
+
+function exportData(type) {
+    const params = getFilterParams();
+    const endpoint = type === 'cars' ? '/api/export/cars' : '/api/export/sales';
+    const label = type === 'cars' ? '车型档案' : '销量汇总';
+
+    showToast(`正在导出${label}，请稍候...`, 'info');
+    toggleExportPanel();
+
+    fetch(endpoint + params)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('导出失败');
+            }
+            const disposition = response.headers.get('Content-Disposition');
+            let filename = `${label}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            if (disposition) {
+                const matches = disposition.match(/filename="?([^"]+)"?/);
+                if (matches && matches[1]) {
+                    filename = matches[1];
+                }
+            }
+            return response.blob().then(blob => ({ blob, filename }));
+        })
+        .then(({ blob, filename }) => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            showToast(`${label}导出成功！`, 'success');
+        })
+        .catch(err => {
+            console.error('Export error:', err);
+            showToast(`${label}导出失败，请重试`, 'danger');
+        });
+}
