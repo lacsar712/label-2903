@@ -15,6 +15,7 @@
         <div class="nav-links">
             {% if current_user.is_authenticated %}
             <a href="{{ url_for('main.home') }}">数据大屏</a>
+            <a href="{{ url_for('main.anxiety_index') }}">充电焦虑指数</a>
             <a href="{{ url_for('main.compare') }}">竞品对标</a>
             <a href="{{ url_for('main.announcements_history') }}">公告中心</a>
             {% if current_user.role == 'admin' %}

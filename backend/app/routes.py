@@ -1288,3 +1288,181 @@ def car_similar(model_name):
         'power_consumption': c.power_consumption,
         'category': c.category
     } for c in similar])
+
+# ========== 充电焦虑指数模块 ==========
+
+@bp.route("/anxiety")
+@login_required
+def anxiety_index():
+    return render_template('anxiety_index.html')
+
+def _get_available_periods():
+    periods = db.session.query(SalesData.period).distinct().order_by(SalesData.period).all()
+    return [p[0] for p in periods]
+
+def _calc_region_sales(period, categories_filter):
+    query = db.session.query(
+        SalesData.region,
+        CarModel.category,
+        func.sum(SalesData.quantity).label('qty')
+    ).join(CarModel).filter(SalesData.period == period)
+    if categories_filter:
+        query = query.filter(CarModel.category.in_(categories_filter))
+    rows = query.group_by(SalesData.region, CarModel.category).all()
+
+    region_totals = {}
+    region_bev = {}
+    for region, cat, qty in rows:
+        region_totals[region] = region_totals.get(region, 0) + (qty or 0)
+        if cat == '纯电':
+            region_bev[region] = region_bev.get(region, 0) + (qty or 0)
+
+    result = {}
+    for region, total in region_totals.items():
+        bev = region_bev.get(region, 0)
+        bev_ratio = bev / total if total > 0 else 0
+        result[region] = {
+            'total_sales': int(total),
+            'bev_sales': int(bev),
+            'bev_ratio': round(bev_ratio * 100, 2)
+        }
+    return result
+
+def _calc_anxiety_index(bev_ratio, density, formula='default'):
+    if density <= 0:
+        return None
+    if formula == 'weighted':
+        return round((pow(bev_ratio, 1.5) / pow(density, 0.5)), 4)
+    elif formula == 'conservative':
+        return round((pow(bev_ratio, 0.5) / pow(density, 1.5)), 4)
+    else:
+        return round((bev_ratio / density), 4)
+
+def _get_province_suggestion(province_name, index, ratio, density):
+    short = province_name.replace('市', '').replace('省', '').replace('壮族自治区', '').replace('回族自治区', '').replace('维吾尔自治区', '').replace('自治区', '').replace('特别行政区', '')
+    if index >= 8:
+        level = '🔴 极度压力'
+        if ratio > 60 and density < 15:
+            advice = f'{short}纯电渗透率已达{ratio}%但充电桩供给严重不足，建议优先在高速服务区和核心商圈批量建设超充站。'
+        else:
+            advice = f'{short}补能体系面临严峻考验，建议立即制定充电桩3年专项规划，并引入民间资本参与建设。'
+    elif index >= 5:
+        level = '🟠 较高压力'
+        if ratio > density * 2:
+            advice = f'{short}纯电销量增长快于补能设施建设，建议重点加密城区公共充电网络。'
+        else:
+            advice = f'{short}补能压力逐步显现，建议在居住区配套建设慢充桩缓解夜间需求。'
+    elif index >= 2.5:
+        level = '🟡 中等压力'
+        advice = f'{short}目前补能供需相对平衡，建议关注重点区域规划预留充电设施用地。'
+    else:
+        level = '🟢 低压力'
+        if density > 35:
+            advice = f'{short}充电桩覆盖率较高，建议探索V2G双向充放电等创新运营模式。'
+        else:
+            advice = f'{short}补能压力较小，可适度超前布局充电设施以支撑未来新能源汽车增长。'
+    return level, advice
+
+@bp.route("/api/anxiety/index")
+@login_required
+def anxiety_index_api():
+    formula = request.args.get('formula', 'default')
+    period = request.args.get('period', '')
+    compare_period = request.args.get('compare_period', '')
+    bev_only = request.args.get('bev_only', '0') == '1'
+    exclude_phev = request.args.get('exclude_phev', '0') == '1'
+
+    periods = _get_available_periods()
+    if not periods:
+        return jsonify({'error': '暂无销量数据', 'periods': [], 'provinces': [], 'summary': {}, 'high_list': [], 'low_list': []})
+
+    if not period:
+        period = periods[-1]
+    if not compare_period and len(periods) >= 2:
+        if period in periods:
+            idx = periods.index(period)
+            compare_period = periods[idx - 1] if idx > 0 else ''
+
+    categories = ['纯电'] if (bev_only or exclude_phev) else ['纯电', '混动']
+
+    current_sales = _calc_region_sales(period, categories)
+
+    piles = ChargingPile.query.all()
+    pile_map = {p.province: p.density for p in piles}
+
+    compare_sales = _calc_region_sales(compare_period, categories) if compare_period else {}
+
+    provinces_data = []
+    all_regions = set(list(current_sales.keys()) + list(pile_map.keys()))
+
+    for region in all_regions:
+        sales_info = current_sales.get(region, {'total_sales': 0, 'bev_sales': 0, 'bev_ratio': 0})
+        density = pile_map.get(region, 0)
+        index_val = _calc_anxiety_index(sales_info['bev_ratio'], density, formula)
+
+        compare_info = compare_sales.get(region, {'bev_ratio': 0})
+        prev_index = _calc_anxiety_index(compare_info['bev_ratio'], pile_map.get(region, 0), formula)
+
+        ring_change = None
+        if prev_index is not None and index_val is not None and prev_index > 0:
+            pct = round((index_val - prev_index) / prev_index * 100, 1)
+            ring_change = {'pct': pct, 'up': pct >= 0}
+
+        level, advice = _get_province_suggestion(region, index_val or 0, sales_info['bev_ratio'], density)
+
+        provinces_data.append({
+            'name': region,
+            'total_sales': sales_info['total_sales'],
+            'bev_sales': sales_info['bev_sales'],
+            'bev_ratio': sales_info['bev_ratio'],
+            'density': density,
+            'index': index_val if index_val is not None else 0,
+            'prev_index': prev_index if prev_index is not None else 0,
+            'ring_change': ring_change,
+            'level': level,
+            'advice': advice
+        })
+
+    valid_provinces = [p for p in provinces_data if p['index'] > 0]
+    valid_provinces.sort(key=lambda x: x['index'], reverse=True)
+    for i, p in enumerate(valid_provinces):
+        p['rank'] = i + 1
+
+    rank_map = {p['name']: p['rank'] for p in valid_provinces}
+    for p in provinces_data:
+        p['rank'] = rank_map.get(p['name'], None)
+
+    index_values = [p['index'] for p in valid_provinces]
+    mean_val = round(sum(index_values) / len(index_values), 4) if index_values else 0
+    sorted_vals = sorted(index_values)
+    n = len(sorted_vals)
+    median_val = round(sorted_vals[n // 2], 4) if n % 2 == 1 else round((sorted_vals[n // 2 - 1] + sorted_vals[n // 2]) / 2, 4) if n > 0 else 0
+
+    top10 = valid_provinces[:10]
+    bottom10 = valid_provinces[-10:][::-1]
+
+    formula_info = {
+        'default': {'name': '默认公式', 'desc': '焦虑指数 = 纯电占比 / 桩密度'},
+        'weighted': {'name': '加权公式', 'desc': '焦虑指数 = 纯电占比^1.5 / 桩密度^0.5（销量权重更高）'},
+        'conservative': {'name': '保守公式', 'desc': '焦虑指数 = 纯电占比^0.5 / 桩密度^1.5（密度权重更高）'}
+    }
+
+    return jsonify({
+        'periods': periods,
+        'current_period': period,
+        'compare_period': compare_period,
+        'formula': formula,
+        'formula_info': formula_info.get(formula, formula_info['default']),
+        'map_data': [{'name': p['name'], 'value': p['index']} for p in provinces_data if p['index'] > 0],
+        'provinces': provinces_data,
+        'top10': top10,
+        'summary': {
+            'mean': mean_val,
+            'median': median_val,
+            'count': len(valid_provinces),
+            'max': max(index_values) if index_values else 0,
+            'min': min(index_values) if index_values else 0
+        },
+        'high_list': valid_provinces[:15],
+        'low_list': valid_provinces[-15:][::-1]
+    })
