@@ -1,6 +1,9 @@
 from flask import Blueprint, render_template, url_for, flash, redirect, request, jsonify, make_response
 from app import db, bcrypt
-from app.models import User, CarModel, SalesData, ChargingPile, AuditLog, Announcement, AnnouncementRead, UserPreference
+from app.models import (
+    User, CarModel, SalesData, ChargingPile, AuditLog, Announcement, AnnouncementRead,
+    UserPreference, CompareReport, CompareShareLink, BrandTracking, BrandWeightConfig,
+)
 from flask_login import login_user, current_user, logout_user, login_required
 from sqlalchemy import func, or_
 import random
