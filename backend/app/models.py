@@ -112,3 +112,44 @@ class AnnouncementRead(db.Model):
     read_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     user = db.relationship('User', backref=db.backref('announcement_reads', lazy=True))
+
+
+class CompareReport(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    report_name = db.Column(db.String(200), nullable=False)
+    city_a = db.Column(db.String(50), nullable=False)
+    city_b = db.Column(db.String(50), nullable=False)
+    city_ref = db.Column(db.String(50), nullable=True)
+    period = db.Column(db.String(20), nullable=True)
+    dimension = db.Column(db.String(20), nullable=False, default='sales')
+    snapshot_json = db.Column(db.Text, nullable=False, default='{}')
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('compare_reports', lazy=True, cascade='all, delete-orphan'))
+
+    def get_snapshot(self):
+        try:
+            return json.loads(self.snapshot_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    def set_snapshot(self, snapshot_dict):
+        self.snapshot_json = json.dumps(snapshot_dict, ensure_ascii=False)
+
+
+class CompareShareLink(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), unique=True, nullable=False)
+    report_id = db.Column(db.Integer, db.ForeignKey('compare_report.id'), nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    expire_at = db.Column(db.DateTime, nullable=False)
+    view_count = db.Column(db.Integer, nullable=False, default=0)
+
+    report = db.relationship('CompareReport', backref=db.backref('share_links', lazy=True, cascade='all, delete-orphan'))
+    creator = db.relationship('User', backref=db.backref('created_share_links', lazy=True))
+
+    def is_expired(self):
+        return datetime.utcnow() > self.expire_at

@@ -1796,3 +1796,437 @@ def admin_preference_stats():
         'top_schemes': [{'scheme_name': s[0], 'use_count': s[1], 'username': s[2]} for s in top_schemes],
         'recent_used': [{'scheme_name': s[0], 'last_used_at': s[1].strftime('%Y-%m-%d %H:%M:%S') if s[1] else '', 'username': s[2]} for s in recent_used]
     })
+
+
+# ========== 区域双城对比模块 ==========
+
+def _normalize_city_name(city):
+    if not city:
+        return city
+    return city
+
+def _match_city_region(city_name, regions):
+    for r in regions:
+        if r == city_name or r.startswith(city_name) or city_name.startswith(r):
+            return r
+    for r in regions:
+        if city_name in r or r in city_name:
+            return r
+    return None
+
+@bp.route("/city_compare")
+@login_required
+def city_compare():
+    return render_template('city_compare.html')
+
+@bp.route("/api/city_compare/cities")
+@login_required
+def get_compare_cities():
+    regions = db.session.query(SalesData.region).distinct().all()
+    city_list = sorted(list(set([r[0] for r in regions])))
+    periods = db.session.query(SalesData.period).distinct().order_by(SalesData.period).all()
+    period_list = [p[0] for p in periods]
+    return jsonify({
+        'cities': city_list,
+        'periods': period_list
+    })
+
+@bp.route("/api/city_compare/data")
+@login_required
+def get_city_compare_data():
+    city_a = request.args.get('city_a', '')
+    city_b = request.args.get('city_b', '')
+    city_ref = request.args.get('city_ref', '')
+    period = request.args.get('period', '')
+    dimension = request.args.get('dimension', 'sales')
+
+    if not city_a or not city_b:
+        return jsonify({'error': '请选择两座城市'}), 400
+
+    all_regions_raw = db.session.query(SalesData.region).distinct().all()
+    all_regions = [r[0] for r in all_regions_raw]
+
+    matched_a = _match_city_region(city_a, all_regions)
+    matched_b = _match_city_region(city_b, all_regions)
+    matched_ref = _match_city_region(city_ref, all_regions) if city_ref else None
+
+    if not matched_a:
+        return jsonify({'error': f'找不到城市: {city_a}'}), 404
+    if not matched_b:
+        return jsonify({'error': f'找不到城市: {city_b}'}), 404
+
+    periods = db.session.query(SalesData.period).distinct().order_by(SalesData.period).all()
+    period_list = [p[0] for p in periods]
+    if not period and period_list:
+        period = period_list[-1]
+
+    def get_city_data(city, target_period):
+        sales_query = db.session.query(
+            CarModel.brand,
+            CarModel.category,
+            func.sum(SalesData.quantity).label('qty'),
+            func.avg(CarModel.price).label('avg_price'),
+            func.avg(CarModel.range_km).label('avg_range')
+        ).select_from(SalesData).join(CarModel).filter(
+            SalesData.region == city,
+            SalesData.period == target_period
+        ).group_by(CarModel.brand, CarModel.category).all()
+
+        total_sales = sum(int(r.qty or 0) for r in sales_query)
+        bev_sales = sum(int(r.qty or 0) for r in sales_query if r.category == '纯电')
+
+        brand_share = []
+        brand_prices = {}
+        for r in sales_query:
+            if r.brand not in brand_prices:
+                brand_prices[r.brand] = {'sales': 0, 'price_list': [], 'range_list': []}
+            brand_prices[r.brand]['sales'] += int(r.qty or 0)
+            if r.avg_price:
+                brand_prices[r.brand]['price_list'].append(float(r.avg_price))
+            if r.avg_range:
+                brand_prices[r.brand]['range_list'].append(float(r.avg_range))
+
+        for brand, info in brand_prices.items():
+            pct = round(info['sales'] / total_sales * 100, 2) if total_sales > 0 else 0
+            avg_p = round(sum(info['price_list']) / len(info['price_list']), 2) if info['price_list'] else 0
+            avg_r = round(sum(info['range_list']) / len(info['range_list']), 1) if info['range_list'] else 0
+            brand_share.append({
+                'brand': brand,
+                'value': info['sales'],
+                'pct': pct,
+                'avg_price': avg_p,
+                'avg_range': avg_r
+            })
+        brand_share.sort(key=lambda x: x['value'], reverse=True)
+
+        prices_flat = []
+        ranges_flat = []
+        for r in sales_query:
+            if r.avg_price:
+                prices_flat.append(float(r.avg_price))
+            if r.avg_range:
+                ranges_flat.append(float(r.avg_range))
+
+        avg_price = round(sum(prices_flat) / len(prices_flat), 2) if prices_flat else 0
+        avg_range = round(sum(ranges_flat) / len(ranges_flat), 1) if ranges_flat else 0
+        bev_ratio = round(bev_sales / total_sales * 100, 2) if total_sales > 0 else 0
+
+        pile = ChargingPile.query.filter(ChargingPile.province == city).first()
+        pile_density = round(pile.density, 1) if pile else 0
+
+        return {
+            'city': city,
+            'total_sales': int(total_sales),
+            'bev_sales': int(bev_sales),
+            'bev_ratio': bev_ratio,
+            'avg_price': avg_price,
+            'avg_range': avg_range,
+            'pile_density': pile_density,
+            'brand_share': brand_share,
+            'anxiety_index': _calc_anxiety_index(bev_ratio, pile_density) or 0
+        }
+
+    data_a = get_city_data(matched_a, period)
+    data_b = get_city_data(matched_b, period)
+    data_ref = get_city_data(matched_ref, period) if matched_ref else None
+
+    quarterly_data = {}
+    for p in period_list:
+        quarterly_data[p] = {
+            'a': get_city_data(matched_a, p),
+            'b': get_city_data(matched_b, p)
+        }
+
+    diff_summary = []
+    dim_map = {
+        'sales': ('总销量', '辆', False),
+        'avg_price': ('平均售价', '万元', True),
+        'avg_range': ('平均续航', 'km', False),
+        'bev_ratio': ('纯电占比', '%', False),
+        'pile_density': ('充电桩密度', '个/km²', False),
+        'anxiety_index': ('焦虑指数', '', True)
+    }
+
+    for dim_key, (label, unit, lower_better) in dim_map.items():
+        val_a = data_a.get(dim_key, 0)
+        val_b = data_b.get(dim_key, 0)
+        diff = round(val_a - val_b, 2)
+        if val_b > 0:
+            pct = round((val_a - val_b) / val_b * 100, 2)
+        else:
+            pct = 0
+        a_better = (diff < 0) if lower_better else (diff > 0)
+        diff_summary.append({
+            'key': dim_key,
+            'label': label,
+            'unit': unit,
+            'value_a': val_a,
+            'value_b': val_b,
+            'diff': diff,
+            'pct': pct,
+            'a_better': a_better,
+            'lower_better': lower_better
+        })
+
+    return jsonify({
+        'periods': period_list,
+        'current_period': period,
+        'city_a': data_a,
+        'city_b': data_b,
+        'city_ref': data_ref,
+        'diff_summary': diff_summary,
+        'quarterly': quarterly_data
+    })
+
+@bp.route("/api/city_compare/brand_sales")
+@login_required
+def get_brand_sales_compare():
+    city_a = request.args.get('city_a', '')
+    city_b = request.args.get('city_b', '')
+    city_ref = request.args.get('city_ref', '')
+    period = request.args.get('period', '')
+    dimension = request.args.get('dimension', 'sales')
+
+    all_regions_raw = db.session.query(SalesData.region).distinct().all()
+    all_regions = [r[0] for r in all_regions_raw]
+
+    matched_a = _match_city_region(city_a, all_regions)
+    matched_b = _match_city_region(city_b, all_regions)
+    matched_ref = _match_city_region(city_ref, all_regions) if city_ref else None
+
+    periods = db.session.query(SalesData.period).distinct().order_by(SalesData.period).all()
+    period_list = [p[0] for p in periods]
+    if not period and period_list:
+        period = period_list[-1]
+
+    def get_brand_metrics(city):
+        if not city:
+            return {}
+        rows = db.session.query(
+            CarModel.brand,
+            func.sum(SalesData.quantity).label('qty'),
+            func.avg(CarModel.price).label('avg_price'),
+            func.avg(CarModel.range_km).label('avg_range'),
+            func.sum(db.case([(CarModel.category == '纯电', SalesData.quantity)], else_=0)).label('bev_qty')
+        ).select_from(SalesData).join(CarModel).filter(
+            SalesData.region == city,
+            SalesData.period == period
+        ).group_by(CarModel.brand).all()
+
+        result = {}
+        brand_total = {}
+        for r in rows:
+            qty = int(r.qty or 0)
+            bev_qty = int(r.bev_qty or 0)
+            price = float(r.avg_price or 0)
+            rng = float(r.avg_range or 0)
+            brand = r.brand
+            if brand not in brand_total:
+                brand_total[brand] = {'total': 0, 'bev': 0}
+            brand_total[brand]['total'] += qty
+            brand_total[brand]['bev'] += bev_qty
+            if price:
+                if 'prices' not in brand_total[brand]:
+                    brand_total[brand]['prices'] = []
+                brand_total[brand]['prices'].append(price)
+            if rng:
+                if 'ranges' not in brand_total[brand]:
+                    brand_total[brand]['ranges'] = []
+                brand_total[brand]['ranges'].append(rng)
+
+        pile = ChargingPile.query.filter(ChargingPile.province == city).first()
+        density = pile.density if pile else 0
+
+        for brand, info in brand_total.items():
+            if dimension == 'sales':
+                result[brand] = info['total']
+            elif dimension == 'avg_price':
+                prices = info.get('prices', [])
+                result[brand] = round(sum(prices) / len(prices), 2) if prices else 0
+            elif dimension == 'bev_ratio':
+                total = info['total']
+                bev = info['bev']
+                result[brand] = round(bev / total * 100, 2) if total > 0 else 0
+            elif dimension == 'avg_range':
+                ranges = info.get('ranges', [])
+                result[brand] = round(sum(ranges) / len(ranges), 1) if ranges else 0
+            elif dimension == 'pile_density':
+                result[brand] = round(density, 1)
+            elif dimension == 'anxiety_index':
+                total = info['total']
+                bev = info['bev']
+                ratio = bev / total * 100 if total > 0 else 0
+                result[brand] = _calc_anxiety_index(ratio, density) or 0
+
+        return result
+
+    data_a = get_brand_metrics(matched_a)
+    data_b = get_brand_metrics(matched_b)
+    data_ref = get_brand_metrics(matched_ref) if matched_ref else {}
+
+    all_brands = sorted(list(set(list(data_a.keys()) + list(data_b.keys()) + list(data_ref.keys()))))
+
+    return jsonify({
+        'brands': all_brands,
+        'data_a': [data_a.get(b, 0) for b in all_brands],
+        'data_b': [data_b.get(b, 0) for b in all_brands],
+        'data_ref': [data_ref.get(b, 0) for b in all_brands],
+        'dimension': dimension
+    })
+
+
+# ========== 对比报告管理 ==========
+
+@bp.route("/api/city_compare/reports", methods=['GET'])
+@login_required
+def get_compare_reports():
+    reports = CompareReport.query.filter_by(user_id=current_user.id).order_by(CompareReport.updated_at.desc()).all()
+    return jsonify({
+        'reports': [{
+            'id': r.id,
+            'report_name': r.report_name,
+            'city_a': r.city_a,
+            'city_b': r.city_b,
+            'city_ref': r.city_ref or '',
+            'period': r.period or '',
+            'dimension': r.dimension,
+            'created_at': r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'updated_at': r.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+        } for r in reports]
+    })
+
+@bp.route("/api/city_compare/reports", methods=['POST'])
+@login_required
+def create_compare_report():
+    data = request.json
+    name = data.get('report_name', '').strip()
+    if not name:
+        return jsonify({'error': '报告名称不能为空'}), 400
+    report = CompareReport(
+        user_id=current_user.id,
+        report_name=name,
+        city_a=data.get('city_a', ''),
+        city_b=data.get('city_b', ''),
+        city_ref=data.get('city_ref') or None,
+        period=data.get('period') or None,
+        dimension=data.get('dimension', 'sales')
+    )
+    report.set_snapshot(data.get('snapshot', {}))
+    db.session.add(report)
+    db.session.commit()
+    log_audit('创建对比报告', f'创建对比报告: {name} (ID: {report.id})')
+    return jsonify({'id': report.id, 'status': 'created'})
+
+@bp.route("/api/city_compare/reports/<int:id>", methods=['GET'])
+@login_required
+def get_compare_report(id):
+    report = CompareReport.query.get_or_404(id)
+    if report.user_id != current_user.id:
+        return jsonify({'error': '无权限'}), 403
+    return jsonify({
+        'id': report.id,
+        'report_name': report.report_name,
+        'city_a': report.city_a,
+        'city_b': report.city_b,
+        'city_ref': report.city_ref or '',
+        'period': report.period or '',
+        'dimension': report.dimension,
+        'snapshot': report.get_snapshot(),
+        'created_at': report.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'updated_at': report.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+    })
+
+@bp.route("/api/city_compare/reports/<int:id>", methods=['PUT'])
+@login_required
+def update_compare_report(id):
+    report = CompareReport.query.get_or_404(id)
+    if report.user_id != current_user.id:
+        return jsonify({'error': '无权限'}), 403
+    data = request.json
+    if 'report_name' in data:
+        report.report_name = data['report_name'].strip() or report.report_name
+    if 'city_a' in data:
+        report.city_a = data['city_a']
+    if 'city_b' in data:
+        report.city_b = data['city_b']
+    if 'city_ref' in data:
+        report.city_ref = data.get('city_ref') or None
+    if 'period' in data:
+        report.period = data.get('period') or None
+    if 'dimension' in data:
+        report.dimension = data['dimension']
+    if 'snapshot' in data:
+        report.set_snapshot(data['snapshot'])
+    db.session.commit()
+    log_audit('更新对比报告', f'更新对比报告: {report.report_name} (ID: {id}')
+    return jsonify({'status': 'updated'})
+
+@bp.route("/api/city_compare/reports/<int:id>", methods=['DELETE'])
+@login_required
+def delete_compare_report(id):
+    report = CompareReport.query.get_or_404(id)
+    if report.user_id != current_user.id:
+        return jsonify({'error': '无权限'}), 403
+    name = report.report_name
+    db.session.delete(report)
+    db.session.commit()
+    log_audit('删除对比报告', f'删除对比报告: {name} (ID: {id})')
+    return jsonify({'status': 'deleted'})
+
+
+# ========== 分享链接 ==========
+
+import secrets
+
+@bp.route("/api/city_compare/share", methods=['POST'])
+@login_required
+def create_share_link():
+    data = request.json
+    report_id = data.get('report_id')
+    if not report_id:
+        return jsonify({'error': '缺少报告ID'}), 400
+    report = CompareReport.query.get_or_404(report_id)
+    if report.user_id != current_user.id:
+        return jsonify({'error': '无权限'}), 403
+    token = secrets.token_urlsafe(32)
+    expire_at = datetime.utcnow() + timedelta(days=7)
+    share = CompareShareLink(
+        token=token,
+        report_id=report.id,
+        created_by=current_user.id,
+        expire_at=expire_at
+    )
+    db.session.add(share)
+    db.session.commit()
+    log_audit('创建分享链接', f'为报告 {report.report_name} 创建分享链接 (Token: {token[:8]}...)')
+    return jsonify({
+        'token': token,
+        'url': f'/city_compare/share/' + token,
+        'expire_at': expire_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'days_valid': 7
+    })
+
+@bp.route("/city_compare/share/<token>")
+def view_shared_compare(token):
+    share = CompareShareLink.query.filter_by(token=token).first()
+    if not share:
+        flash('分享链接不存在或已失效', 'danger')
+        return redirect(url_for('main.city_compare'))
+    if share.is_expired():
+        flash('分享链接已过期', 'danger')
+        return redirect(url_for('main.city_compare'))
+    share.view_count = (share.view_count or 0) + 1
+    db.session.commit()
+    report = share.report
+    snapshot = report.get_snapshot()
+    return render_template('city_compare.html', shared=True, share_data={
+        'report_name': report.report_name,
+        'city_a': report.city_a,
+        'city_b': report.city_b,
+        'city_ref': report.city_ref or '',
+        'period': report.period or '',
+        'dimension': report.dimension,
+        'snapshot': snapshot,
+        'share_token': token,
+        'view_count': share.view_count
+    })

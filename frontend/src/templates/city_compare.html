@@ -1,0 +1,1173 @@
+{% extends "base.html" %}
+{% block title %}区域双城对比{% endblock %}
+{% block content %}
+
+<div class="city-compare-header">
+    <div class="city-compare-title-wrap">
+        <h2>区域双城对比</h2>
+        <p>选择两座城市进行新能源汽车市场多维度横向较量</p>
+    </div>
+    <div class="city-compare-header-actions">
+        {% if not shared %}
+        <button class="btn btn-outline" id="btnMyReports">
+            <span class="action-icon">📋</span>
+            <span>我的报告</span>
+        </button>
+        <button class="btn btn-save" id="btnSaveReport">
+            <span class="action-icon">💾</span>
+            <span>保存报告</span>
+        </button>
+        <button class="btn btn-share" id="btnShareReport">
+            <span class="action-icon">🔗</span>
+            <span>生成分享</span>
+        </button>
+        {% else %}
+        <div class="shared-badge">
+            👁️ 只读模式 · {{ share_data.report_name }} · 已查看 {{ share_data.view_count }} 次
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="city-compare-controls chart-card">
+    <div class="cc-control-row">
+        <div class="cc-city-selectors">
+            <div class="cc-city-slot city-a">
+                <div class="cc-city-label" style="color: #38bdf8;">城市 A</div>
+                <select id="cityASelect" {% if shared %}disabled{% endif %}>
+                    <option value="">选择城市</option>
+                </select>
+            </div>
+            <button class="btn-swap" id="btnSwapCities" title="交换 A/B" {% if shared %}disabled{% endif %}>
+                ⇄
+            </button>
+            <div class="cc-city-slot city-b">
+                <div class="cc-city-label" style="color: #f472b6;">城市 B</div>
+                <select id="cityBSelect" {% if shared %}disabled{% endif %}>
+                    <option value="">选择城市</option>
+                </select>
+            </div>
+            <div class="cc-city-slot city-ref">
+                <div class="cc-city-label" style="color: #94a3b8;">参照 (可选)</div>
+                <select id="cityRefSelect" {% if shared %}disabled{% endif %}>
+                    <option value="">--</option>
+                </select>
+            </div>
+        </div>
+        <div class="cc-period-selector">
+            <div class="cc-city-label" style="color: #94a3b8;">历史季度</div>
+            <select id="periodSelect" {% if shared %}disabled{% endif %}>
+                <option value="">最新季度</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="cc-dimension-tabs">
+        <div class="cc-dim-tab active" data-dim="sales">
+            <span class="dim-icon">📊</span>
+            <span>销量</span>
+        </div>
+        <div class="cc-dim-tab" data-dim="avg_price">
+            <span class="dim-icon">💰</span>
+            <span>均价</span>
+        </div>
+        <div class="cc-dim-tab" data-dim="bev_ratio">
+            <span class="dim-icon">⚡</span>
+            <span>纯电占比</span>
+        </div>
+        <div class="cc-dim-tab" data-dim="pile_density">
+            <span class="dim-icon">🔌</span>
+            <span>充电桩密度</span>
+        </div>
+        <div class="cc-dim-tab" data-dim="anxiety_index">
+            <span class="dim-icon">😰</span>
+            <span>焦虑指数</span>
+        </div>
+    </div>
+</div>
+
+<div class="city-compare-body">
+    <div class="cc-pies-row">
+        <div class="cc-city-panel chart-card panel-a">
+            <div class="panel-city-title">
+                <span class="city-dot" style="background: #38bdf8;"></span>
+                <span id="cityATitle">城市 A</span>
+            </div>
+            <div id="pieChartA" class="chart-box" style="height: 300px;"></div>
+            <div class="cc-stats-row">
+                <div class="cc-stat-card">
+                    <div class="cc-stat-label">平均售价</div>
+                    <div class="cc-stat-value" id="statPriceA">--</div>
+                    <div class="cc-stat-unit">万元</div>
+                </div>
+                <div class="cc-stat-card">
+                    <div class="cc-stat-label">平均续航</div>
+                    <div class="cc-stat-value" id="statRangeA">--</div>
+                    <div class="cc-stat-unit">km</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="cc-diff-band chart-card">
+            <div class="diff-band-title">差异摘要</div>
+            <div class="diff-items" id="diffItems">
+                <div class="diff-empty">请选择两座城市开始对比</div>
+            </div>
+        </div>
+
+        <div class="cc-city-panel chart-card panel-b">
+            <div class="panel-city-title">
+                <span class="city-dot" style="background: #f472b6;"></span>
+                <span id="cityBTitle">城市 B</span>
+            </div>
+            <div id="pieChartB" class="chart-box" style="height: 300px;"></div>
+            <div class="cc-stats-row">
+                <div class="cc-stat-card">
+                    <div class="cc-stat-label">平均售价</div>
+                    <div class="cc-stat-value" id="statPriceB">--</div>
+                    <div class="cc-stat-unit">万元</div>
+                </div>
+                <div class="cc-stat-card">
+                    <div class="cc-stat-label">平均续航</div>
+                    <div class="cc-stat-value" id="statRangeB">--</div>
+                    <div class="cc-stat-unit">km</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="cc-bars-row">
+        <div class="cc-bar-card chart-card">
+            <h3>纯电车型占比对比</h3>
+            <div class="dual-bar-track">
+                <div class="dual-bar-label">
+                    <span id="bevLabelA">--</span>
+                    <span id="bevPctA" class="bar-pct pct-a">--</span>
+                </div>
+                <div class="dual-bar-row">
+                    <div class="bar-side bar-side-a">
+                        <div class="bar-fill bar-fill-a" id="bevBarA" style="width: 0%;"></div>
+                    </div>
+                    <div class="bar-divider"></div>
+                    <div class="bar-side bar-side-b">
+                        <div class="bar-fill bar-fill-b" id="bevBarB" style="width: 0%;"></div>
+                    </div>
+                </div>
+                <div class="dual-bar-label right">
+                    <span id="bevPctB" class="bar-pct pct-b">--</span>
+                    <span id="bevLabelB">--</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="cc-bar-card chart-card">
+            <h3>充电桩密度对比 (个/km²)</h3>
+            <div class="dual-bar-track">
+                <div class="dual-bar-label">
+                    <span id="pileLabelA">--</span>
+                    <span id="pileValA" class="bar-pct pct-a">--</span>
+                </div>
+                <div class="dual-bar-row">
+                    <div class="bar-side bar-side-a">
+                        <div class="bar-fill bar-fill-a" id="pileBarA" style="width: 0%;"></div>
+                    </div>
+                    <div class="bar-divider"></div>
+                    <div class="bar-side bar-side-b">
+                        <div class="bar-fill bar-fill-b" id="pileBarB" style="width: 0%;"></div>
+                    </div>
+                </div>
+                <div class="dual-bar-label right">
+                    <span id="pileValB" class="bar-pct pct-b">--</span>
+                    <span id="pileLabelB">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="cc-mini-trend chart-card">
+        <div class="cc-trend-header">
+            <h3>历史季度对比变化</h3>
+            <div class="cc-trend-legend">
+                <span class="legend-dot" style="background: #38bdf8;"></span>
+                <span id="trendLegendA">城市 A</span>
+                <span class="legend-dot" style="background: #f472b6;"></span>
+                <span id="trendLegendB">城市 B</span>
+                <span class="legend-dot legend-dot-dashed" style="border-color: #94a3b8;"></span>
+                <span>当前周期</span>
+            </div>
+        </div>
+        <div id="miniTrendChart" class="chart-box" style="height: 220px;"></div>
+    </div>
+
+    <div class="cc-brand-chart chart-card">
+        <div class="cc-brand-header">
+            <h3 id="brandChartTitle">分品牌销量差异</h3>
+            <div class="cc-ref-indicator" id="refIndicator" style="display:none;">
+                <span class="legend-dot legend-dot-dashed" style="border-color: #a78bfa;"></span>
+                <span id="refIndicatorText">参照城市</span>
+            </div>
+        </div>
+        <div id="brandBarChart" class="chart-box" style="height: 380px;"></div>
+    </div>
+</div>
+
+<div id="reportsModal" class="modal-overlay" style="display: none;">
+    <div class="modal cc-reports-modal">
+        <div class="modal-header">
+            <h4>我的对比报告</h4>
+            <button class="modal-close-btn" onclick="closeReportsModal()">&times;</button>
+        </div>
+        <div class="reports-list" id="reportsList">
+            <div class="reports-empty">暂无保存的报告</div>
+        </div>
+    </div>
+</div>
+
+<div id="saveReportModal" class="modal-overlay" style="display: none;">
+    <div class="modal">
+        <h4>保存对比报告</h4>
+        <div class="save-report-form">
+            <div class="form-group">
+                <label>报告名称</label>
+                <input type="text" id="reportNameInput" placeholder="例如：京沪双城Q1对比分析">
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn" style="background: #334155;" onclick="closeSaveReportModal()">取消</button>
+            <button class="btn" onclick="confirmSaveReport()">保存</button>
+        </div>
+    </div>
+</div>
+
+<div id="shareModal" class="modal-overlay" style="display: none;">
+    <div class="modal">
+        <h4>生成只读分享链接</h4>
+        <div id="shareResultArea" style="display: none;">
+            <div class="share-info">
+                <div class="share-info-item">
+                    <span class="share-label">链接地址：</span>
+                    <div class="share-url-wrap">
+                        <input type="text" id="shareUrlInput" readonly>
+                        <button class="btn btn-copy" onclick="copyShareUrl()">复制</button>
+                    </div>
+                </div>
+                <div class="share-info-item">
+                    <span class="share-label">有效期至：</span>
+                    <span id="shareExpire" style="color: #10b981; font-weight: 600;"></span>
+                    <span style="color: #94a3b8; font-size: 12px;">（7天有效，默认）</span>
+                </div>
+            </div>
+        </div>
+        <div id="shareLoading" style="text-align: center; padding: 20px; color: #94a3b8;">
+            正在生成分享链接...
+        </div>
+        <div class="modal-actions">
+            <button class="btn" style="background: #334155;" onclick="closeShareModal()">关闭</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const COLOR_A = '#38bdf8';
+    const COLOR_B = '#f472b6';
+    const COLOR_REF = '#a78bfa';
+    const COLOR_GOOD = '#10b981';
+    const COLOR_BAD = '#ef4444';
+
+    const PIE_COLORS = ['#38bdf8', '#818cf8', '#c084fc', '#f472b6', '#fbbf24', '#10b981', '#fb923c', '#22d3ee', '#f87171', '#a3e635'];
+
+    const DIM_LABELS = {
+        'sales': '销量',
+        'avg_price': '均价',
+        'bev_ratio': '纯电占比',
+        'pile_density': '充电桩密度',
+        'anxiety_index': '焦虑指数'
+    };
+
+    const DIM_UNITS = {
+        'sales': '辆',
+        'avg_price': '万元',
+        'bev_ratio': '%',
+        'pile_density': '个/km²',
+        'anxiety_index': ''
+    };
+
+    let state = {
+        cityA: '',
+        cityB: '',
+        cityRef: '',
+        period: '',
+        dimension: 'sales',
+        currentData: null,
+        brandData: null,
+        pieA: null,
+        pieB: null,
+        trendChart: null,
+        brandChart: null,
+        shared: {{ 'true' if shared else 'false' }},
+        savedReportId: null
+    };
+
+    {% if shared %}
+    const SHARED_DATA = {{ share_data | tojson }};
+    {% endif %}
+
+    function init() {
+        state.pieA = echarts.init(document.getElementById('pieChartA'));
+        state.pieB = echarts.init(document.getElementById('pieChartB'));
+        state.trendChart = echarts.init(document.getElementById('miniTrendChart'));
+        state.brandChart = echarts.init(document.getElementById('brandBarChart'));
+
+        {% if shared %}
+        initShared();
+        {% else %}
+        initSelectors();
+        {% endif %}
+
+        bindEvents();
+        initEmptyCharts();
+
+        window.addEventListener('resize', function() {
+            state.pieA && state.pieA.resize();
+            state.pieB && state.pieB.resize();
+            state.trendChart && state.trendChart.resize();
+            state.brandChart && state.brandChart.resize();
+        });
+    }
+
+    function initShared() {
+        document.getElementById('cityASelect').innerHTML = '<option>' + SHARED_DATA.city_a + '</option>';
+        document.getElementById('cityBSelect').innerHTML = '<option>' + SHARED_DATA.city_b + '</option>';
+        if (SHARED_DATA.city_ref) {
+            document.getElementById('cityRefSelect').innerHTML = '<option>' + SHARED_DATA.city_ref + '</option>';
+        }
+        if (SHARED_DATA.period) {
+            document.getElementById('periodSelect').innerHTML = '<option>' + SHARED_DATA.period + '</option>';
+        }
+        document.querySelectorAll('.cc-dim-tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.dim === SHARED_DATA.dimension);
+        });
+        state.cityA = SHARED_DATA.city_a;
+        state.cityB = SHARED_DATA.city_b;
+        state.cityRef = SHARED_DATA.city_ref;
+        state.period = SHARED_DATA.period;
+        state.dimension = SHARED_DATA.dimension;
+
+        if (SHARED_DATA.snapshot && Object.keys(SHARED_DATA.snapshot).length > 0) {
+            applySnapshot(SHARED_DATA.snapshot);
+        } else {
+            loadCompareData();
+        }
+    }
+
+    function initSelectors() {
+        fetch('/api/city_compare/cities').then(r => r.json()).then(data => {
+            const cityOptsA = data.cities.map(c => `<option value="${c}">${c}</option>`).join('');
+            const cityOptsB = data.cities.map(c => `<option value="${c}">${c}</option>`).join('');
+            const cityOptsRef = '<option value="">--</option>' + data.cities.map(c => `<option value="${c}">${c}</option>`).join('');
+            const periodOpts = '<option value="">最新季度</option>' + data.periods.slice().reverse().map(p => `<option value="${p}">${p}</option>`).join('');
+            document.getElementById('cityASelect').innerHTML = '<option value="">选择城市</option>' + cityOptsA;
+            document.getElementById('cityBSelect').innerHTML = '<option value="">选择城市</option>' + cityOptsB;
+            document.getElementById('cityRefSelect').innerHTML = cityOptsRef;
+            document.getElementById('periodSelect').innerHTML = periodOpts;
+
+            if (data.cities.length >= 2) {
+                document.getElementById('cityASelect').value = data.cities[0];
+                document.getElementById('cityBSelect').value = data.cities.length >= 3 ? data.cities[2] : data.cities[1];
+                state.cityA = data.cities[0];
+                state.cityB = data.cities.length >= 3 ? data.cities[2] : data.cities[1];
+                loadCompareData();
+            }
+        });
+    }
+
+    function bindEvents() {
+        document.getElementById('cityASelect').addEventListener('change', function() {
+            state.cityA = this.value;
+            if (state.cityA && state.cityB) loadCompareData();
+        });
+        document.getElementById('cityBSelect').addEventListener('change', function() {
+            state.cityB = this.value;
+            if (state.cityA && state.cityB) loadCompareData();
+        });
+        document.getElementById('cityRefSelect').addEventListener('change', function() {
+            state.cityRef = this.value;
+            if (state.cityA && state.cityB) loadCompareData();
+        });
+        document.getElementById('periodSelect').addEventListener('change', function() {
+            state.period = this.value;
+            if (state.cityA && state.cityB) loadCompareData();
+        });
+
+        document.querySelectorAll('.cc-dim-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                if (state.shared) return;
+                const dim = this.dataset.dim;
+                if (dim === state.dimension) return;
+                state.dimension = dim;
+                document.querySelectorAll('.cc-dim-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                refreshByDimension();
+            });
+        });
+
+        document.getElementById('btnSwapCities').addEventListener('click', function() {
+            if (state.shared) return;
+            if (!state.cityA || !state.cityB) return;
+            const tmp = state.cityA;
+            state.cityA = state.cityB;
+            state.cityB = tmp;
+            const selA = document.getElementById('cityASelect');
+            const selB = document.getElementById('cityBSelect');
+            const valA = selA.value;
+            const valB = selB.value;
+            selA.value = valB;
+            selB.value = valA;
+            loadCompareData();
+            showToast('已交换 A / B 城市位置', 'info');
+        });
+
+        if (!state.shared) {
+            document.getElementById('btnMyReports').addEventListener('click', openReportsModal);
+            document.getElementById('btnSaveReport').addEventListener('click', openSaveReportModal);
+            document.getElementById('btnShareReport').addEventListener('click', openShareFlow);
+        }
+    }
+
+    function initEmptyCharts() {
+        const emptyOpt = {
+            title: { text: '请选择城市', left: 'center', top: 'middle', textStyle: { color: '#64748b', fontSize: 14 } },
+            tooltip: { show: false }, legend: { show: false }, series: []
+        };
+        state.pieA.setOption(emptyOpt, true);
+        state.pieB.setOption(emptyOpt, true);
+
+        state.trendChart.setOption({
+            title: { text: '选择两座城市查看季度对比趋势', left: 'center', top: 'middle', textStyle: { color: '#64748b', fontSize: 13 } },
+            tooltip: { show: false }, legend: { show: false }, series: []
+        }, true);
+
+        state.brandChart.setOption({
+            title: { text: '选择两座城市查看品牌差异', left: 'center', top: 'middle', textStyle: { color: '#64748b', fontSize: 14 } },
+            tooltip: { show: false }, legend: { show: false }, series: []
+        }, true);
+    }
+
+    function buildUrl() {
+        const params = new URLSearchParams();
+        params.set('city_a', state.cityA);
+        params.set('city_b', state.cityB);
+        if (state.cityRef) params.set('city_ref', state.cityRef);
+        if (state.period) params.set('period', state.period);
+        params.set('dimension', state.dimension);
+        return params.toString();
+    }
+
+    async function loadCompareData() {
+        try {
+            const res = await fetch('/api/city_compare/data?' + buildUrl());
+            if (!res.ok) {
+                const err = await res.json();
+                showToast(err.error || '加载数据失败', 'danger');
+                return;
+            }
+            const data = await res.json();
+            state.currentData = data;
+            renderAll(data);
+            loadBrandCompare();
+        } catch (e) {
+            console.error(e);
+            showToast('加载数据失败', 'danger');
+        }
+    }
+
+    async function loadBrandCompare() {
+        try {
+            const res = await fetch('/api/city_compare/brand_sales?' + buildUrl());
+            if (!res.ok) return;
+            const data = await res.json();
+            state.brandData = data;
+            renderBrandChart(data);
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function refreshByDimension() {
+        renderDiffSummary(state.currentData);
+        renderBrandHeader();
+        if (state.brandData) {
+            loadBrandCompare();
+        }
+        if (state.currentData) {
+            renderTrendChart(state.currentData);
+        }
+    }
+
+    function renderAll(data) {
+        updateCityTitles(data);
+        renderPie(state.pieA, data.cityA);
+        renderPie(state.pieB, data.cityB);
+        renderStats(data);
+        renderDualBars(data);
+        renderDiffSummary(data);
+        renderTrendChart(data);
+        renderBrandHeader();
+    }
+
+    function applySnapshot(snap) {
+        state.currentData = snap.main_data;
+        state.brandData = snap.brand_data;
+        renderAll(snap.main_data);
+        renderBrandChart(snap.brand_data);
+    }
+
+    function updateCityTitles(data) {
+        const nameA = data.cityA.city;
+        const nameB = data.cityB.city;
+        document.getElementById('cityATitle').textContent = nameA;
+        document.getElementById('cityBTitle').textContent = nameB;
+        document.getElementById('bevLabelA').textContent = nameA;
+        document.getElementById('bevLabelB').textContent = nameB;
+        document.getElementById('pileLabelA').textContent = nameA;
+        document.getElementById('pileLabelB').textContent = nameB;
+        document.getElementById('trendLegendA').textContent = nameA;
+        document.getElementById('trendLegendB').textContent = nameB;
+    }
+
+    function renderPie(chart, cityData) {
+        const data = (cityData.brand_share || []).map(item => ({
+            name: item.brand,
+            value: item.value
+        }));
+        if (data.length === 0) {
+            chart.setOption({
+                title: { text: '暂无数据', left: 'center', top: 'middle', textStyle: { color: '#64748b', fontSize: 13 } },
+                tooltip: { show: false }, legend: { show: false }, series: []
+            }, true);
+            return;
+        }
+        chart.setOption({
+            tooltip: {
+                trigger: 'item',
+                backgroundColor: '#1e293b',
+                borderColor: '#334155',
+                textStyle: { color: '#fff' },
+                formatter: p => `${p.name}<br/>销量: ${p.value.toLocaleString()} 辆<br/>占比: ${p.percent}%`
+            },
+            legend: {
+                type: 'scroll',
+                orient: 'horizontal',
+                bottom: 0,
+                textStyle: { color: '#94a3b8', fontSize: 11 },
+                itemWidth: 10, itemHeight: 10
+            },
+            color: PIE_COLORS,
+            series: [{
+                type: 'pie',
+                radius: ['35%', '68%'],
+                center: ['50%', '42%'],
+                avoidLabelOverlap: true,
+                itemStyle: { borderRadius: 6, borderColor: '#1e293b', borderWidth: 2 },
+                label: { show: false },
+                emphasis: {
+                    label: { show: true, fontSize: 14, fontWeight: 'bold', color: '#fff' },
+                    itemStyle: { shadowBlur: 20, shadowColor: 'rgba(0,0,0,0.5)' }
+                },
+                labelLine: { show: false },
+                data: data
+            }]
+        }, true);
+    }
+
+    function renderStats(data) {
+        document.getElementById('statPriceA').textContent = data.cityA.avg_price || '--';
+        document.getElementById('statRangeA').textContent = data.cityA.avg_range || '--';
+        document.getElementById('statPriceB').textContent = data.cityB.avg_price || '--';
+        document.getElementById('statRangeB').textContent = data.cityB.avg_range || '--';
+    }
+
+    function renderDualBars(data) {
+        const maxBev = Math.max(data.cityA.bev_ratio, data.cityB.bev_ratio, 1);
+        document.getElementById('bevPctA').textContent = data.cityA.bev_ratio.toFixed(1) + '%';
+        document.getElementById('bevPctB').textContent = data.cityB.bev_ratio.toFixed(1) + '%';
+        document.getElementById('bevBarA').style.width = (data.cityA.bev_ratio / maxBev * 100).toFixed(1) + '%';
+        document.getElementById('bevBarB').style.width = (data.cityB.bev_ratio / maxBev * 100).toFixed(1) + '%';
+
+        const maxPile = Math.max(data.cityA.pile_density, data.cityB.pile_density, 1);
+        document.getElementById('pileValA').textContent = data.cityA.pile_density.toFixed(1);
+        document.getElementById('pileValB').textContent = data.cityB.pile_density.toFixed(1);
+        document.getElementById('pileBarA').style.width = (data.cityA.pile_density / maxPile * 100).toFixed(1) + '%';
+        document.getElementById('pileBarB').style.width = (data.cityB.pile_density / maxPile * 100).toFixed(1) + '%';
+    }
+
+    function renderDiffSummary(data) {
+        const container = document.getElementById('diffItems');
+        const items = data.diff_summary || [];
+        if (items.length === 0) {
+            container.innerHTML = '<div class="diff-empty">暂无差异数据</div>';
+            return;
+        }
+        container.innerHTML = items.map(item => {
+            const diffVal = item.diff;
+            const pct = item.pct;
+            const sign = diffVal > 0 ? '+' : '';
+            const pctSign = pct > 0 ? '+' : '';
+            let colorClass, arrow;
+            if (Math.abs(diffVal) < 0.001) {
+                colorClass = 'diff-neutral';
+                arrow = '═';
+            } else if (item.a_better) {
+                colorClass = 'diff-a-better';
+                arrow = '◀';
+            } else {
+                colorClass = 'diff-b-better';
+                arrow = '▶';
+            }
+            const diffDisplay = item.key === 'avg_price' ? diffVal.toFixed(2) :
+                              (item.key === 'sales' || item.key === 'bev_ratio' || item.key === 'pile_density' || item.key === 'anxiety_index' || item.key === 'avg_range'
+                              ? (Math.abs(diffVal) >= 1 ? diffVal.toFixed(1) : diffVal.toFixed(2))
+                              : diffVal.toFixed(2));
+            const pctDisplay = Math.abs(pct) >= 0.1 ? pctSign + pct.toFixed(1) + '%' : '≈ 0%';
+            return `
+                <div class="diff-item ${colorClass}">
+                    <div class="diff-label">${item.label}</div>
+                    <div class="diff-metrics">
+                        <div class="diff-side">
+                            <span class="diff-val-a">${formatDimVal(item.value_a, item.key)}</span>
+                        </div>
+                        <div class="diff-arrow-band">
+                            <span class="diff-arrow">${arrow}</span>
+                        </div>
+                        <div class="diff-side">
+                            <span class="diff-val-b">${formatDimVal(item.value_b, item.key)}</span>
+                        </div>
+                    </div>
+                    <div class="diff-gap-band">
+                        <div class="diff-gap-text">
+                            ${sign}${diffDisplay} ${item.unit}
+                            <span class="diff-gap-pct">(${pctDisplay})</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function formatDimVal(val, key) {
+        if (val === null || val === undefined) return '--';
+        if (key === 'avg_price') return val.toFixed(2) + ' 万';
+        if (key === 'avg_range') return val.toFixed(1) + ' km';
+        if (key === 'bev_ratio') return val.toFixed(1) + '%';
+        if (key === 'pile_density') return val.toFixed(1);
+        if (key === 'anxiety_index') return val.toFixed(2);
+        if (key === 'sales') return val.toLocaleString();
+        return val;
+    }
+
+    function renderTrendChart(data) {
+        const periods = data.periods || [];
+        const quarterly = data.quarterly || {};
+        const dim = state.dimension;
+
+        const valsA = periods.map(p => {
+            const q = quarterly[p];
+            if (!q || !q.a) return null;
+            return q.a[dim] !== undefined ? q.a[dim] : null;
+        });
+        const valsB = periods.map(p => {
+            const q = quarterly[p];
+            if (!q || !q.b) return null;
+            return q.b[dim] !== undefined ? q.b[dim] : null;
+        });
+
+        const unit = DIM_UNITS[dim] || '';
+        const label = DIM_LABELS[dim] || '';
+        const currentPeriod = data.current_period;
+        const currentIdx = periods.indexOf(currentPeriod);
+
+        state.trendChart.setOption({
+            tooltip: {
+                trigger: 'axis',
+                backgroundColor: '#1e293b',
+                borderColor: '#334155',
+                textStyle: { color: '#fff', fontSize: 12 },
+                formatter: params => {
+                    let html = `<div style="font-weight:600;margin-bottom:6px;">${params[0].axisValue}</div>`;
+                    params.forEach(p => {
+                        const val = p.value;
+                        if (val === null || val === undefined) return;
+                        let display = (typeof val === 'number') ?
+                            ((dim === 'sales' ? val.toLocaleString() : val.toFixed(dim === 'avg_price' || dim === 'anxiety_index' ? 2 : 1)) + (unit ? ' ' + unit : '')) : val;
+                        html += `<div style="display:flex;justify-content:space-between;gap:20px;"><span style="color:${p.color};">● ${p.seriesName}</span><b>${display}</b></div>`;
+                    });
+                    if (params[0].dataIndex === currentIdx) {
+                        html += `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #334155;color:#a78bfa;font-size:11px;">━━ 当前选择周期</div>`;
+                    }
+                    return html;
+                }
+            },
+            grid: { left: 50, right: 30, top: 30, bottom: 30 },
+            legend: { show: false },
+            xAxis: {
+                type: 'category',
+                data: periods,
+                boundaryGap: false,
+                axisLabel: { color: '#94a3b8', fontSize: 11 },
+                axisLine: { lineStyle: { color: '#334155' } }
+            },
+            yAxis: {
+                type: 'value',
+                name: label + (unit ? ` (${unit})` : ''),
+                nameTextStyle: { color: '#64748b', fontSize: 11, padding: [0, 0, 0, 30] },
+                axisLabel: {
+                    color: '#94a3b8', fontSize: 11,
+                    formatter: v => dim === 'sales' ? v.toLocaleString() : v
+                },
+                splitLine: { lineStyle: { color: 'rgba(51,65,85,0.6)' } }
+            },
+            series: [
+                {
+                    name: data.cityA.city || '城市 A',
+                    type: 'line',
+                    data: valsA,
+                    smooth: true,
+                    symbol: 'circle',
+                    symbolSize: 6,
+                    lineStyle: { width: 3, color: COLOR_A },
+                    itemStyle: { color: COLOR_A, borderColor: '#fff', borderWidth: 1.5 },
+                    connectNulls: true,
+                    areaStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: 'rgba(56,189,248,0.25)' },
+                            { offset: 1, color: 'rgba(56,189,248,0.0)' }
+                        ])
+                    },
+                    markLine: currentIdx >= 0 ? {
+                        silent: true,
+                        symbol: 'none',
+                        lineStyle: { type: 'dashed', color: COLOR_REF, width: 1.5 },
+                        label: { show: false },
+                        data: [{ xAxis: currentIdx }]
+                    } : undefined
+                },
+                {
+                    name: data.cityB.city || '城市 B',
+                    type: 'line',
+                    data: valsB,
+                    smooth: true,
+                    symbol: 'circle',
+                    symbolSize: 6,
+                    lineStyle: { width: 3, color: COLOR_B },
+                    itemStyle: { color: COLOR_B, borderColor: '#fff', borderWidth: 1.5 },
+                    connectNulls: true,
+                    areaStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: 'rgba(244,114,182,0.25)' },
+                            { offset: 1, color: 'rgba(244,114,182,0.0)' }
+                        ])
+                    }
+                }
+            ]
+        }, true);
+    }
+
+    function renderBrandHeader() {
+        const title = '分品牌' + DIM_LABELS[state.dimension] + '差异';
+        document.getElementById('brandChartTitle').textContent = title;
+
+        const refInd = document.getElementById('refIndicator');
+        if (state.cityRef && state.currentData && state.currentData.city_ref) {
+            refInd.style.display = '';
+            document.getElementById('refIndicatorText').textContent = state.currentData.city_ref.city;
+        } else {
+            refInd.style.display = 'none';
+        }
+    }
+
+    function renderBrandChart(data) {
+        const brands = data.brands || [];
+        if (brands.length === 0) {
+            state.brandChart.setOption({
+                title: { text: '暂无品牌数据', left: 'center', top: 'middle', textStyle: { color: '#64748b', fontSize: 14 } },
+                tooltip: { show: false }, legend: { show: false }, series: []
+            }, true);
+            return;
+        }
+
+        const nameA = state.currentData ? state.currentData.cityA.city : '城市 A';
+        const nameB = state.currentData ? state.currentData.cityB.city : '城市 B';
+        const nameRef = state.currentData && state.currentData.city_ref ? state.currentData.city_ref.city : null;
+
+        const unit = DIM_UNITS[state.dimension] || '';
+        const dimLabel = DIM_LABELS[state.dimension] || '';
+
+        const series = [
+            {
+                name: nameA,
+                type: 'bar',
+                data: data.data_a,
+                barWidth: nameRef ? 18 : 24,
+                itemStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: COLOR_A },
+                        { offset: 1, color: 'rgba(56,189,248,0.5)' }
+                    ]),
+                    borderRadius: [4, 4, 0, 0]
+                }
+            },
+            {
+                name: nameB,
+                type: 'bar',
+                data: data.data_b,
+                barWidth: nameRef ? 18 : 24,
+                itemStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: COLOR_B },
+                        { offset: 1, color: 'rgba(244,114,182,0.5)' }
+                    ]),
+                    borderRadius: [4, 4, 0, 0]
+                }
+            }
+        ];
+        const legendData = [nameA, nameB];
+
+        if (nameRef) {
+            series.push({
+                name: nameRef + ' (参照)',
+                type: 'bar',
+                data: data.data_ref,
+                barWidth: 18,
+                itemStyle: {
+                    color: 'rgba(167,139,250,0.15)',
+                    borderColor: COLOR_REF,
+                    borderWidth: 1.5,
+                    borderType: 'dashed',
+                    borderRadius: [4, 4, 0, 0]
+                },
+                z: 1
+            });
+            legendData.push(nameRef + ' (参照)');
+        }
+
+        state.brandChart.setOption({
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'shadow' },
+                backgroundColor: '#1e293b',
+                borderColor: '#334155',
+                textStyle: { color: '#fff', fontSize: 12 },
+                formatter: params => {
+                    let html = `<div style="font-weight:600;margin-bottom:8px;">${params[0].axisValue}</div>`;
+                    params.forEach(p => {
+                        const v = p.value;
+                        const display = (state.dimension === 'sales' ? v.toLocaleString() :
+                                        (state.dimension === 'avg_price' || state.dimension === 'anxiety_index' ? v.toFixed(2) : v.toFixed(1)))
+                                       + (unit ? ' ' + unit : '');
+                        html += `<div style="display:flex;justify-content:space-between;gap:20px;margin:3px 0;"><span style="color:${p.color};">■ ${p.seriesName}</span><b>${display}</b></div>`;
+                    });
+                    return html;
+                }
+            },
+            legend: {
+                data: legendData,
+                top: 5,
+                right: 10,
+                textStyle: { color: '#94a3b8', fontSize: 12 },
+                itemWidth: 14,
+                itemHeight: 10
+            },
+            grid: { left: 60, right: 30, top: 50, bottom: 60 },
+            xAxis: {
+                type: 'category',
+                data: brands,
+                axisLabel: {
+                    color: '#94a3b8', fontSize: 11,
+                    interval: 0,
+                    rotate: brands.length > 8 ? 25 : 0
+                },
+                axisLine: { lineStyle: { color: '#334155' } }
+            },
+            yAxis: {
+                type: 'value',
+                name: dimLabel + (unit ? ` (${unit})` : ''),
+                nameTextStyle: { color: '#64748b', fontSize: 11, padding: [0, 0, 0, 40] },
+                axisLabel: {
+                    color: '#94a3b8', fontSize: 11,
+                    formatter: v => state.dimension === 'sales' ? v.toLocaleString() : v
+                },
+                splitLine: { lineStyle: { color: 'rgba(51,65,85,0.6)' } }
+            },
+            series: series
+        }, true);
+    }
+
+
+    // ========== 报告管理 ==========
+
+    function openReportsModal() {
+        const modal = document.getElementById('reportsModal');
+        modal.style.display = 'flex';
+        loadReportsList();
+    }
+
+    window.closeReportsModal = function() {
+        document.getElementById('reportsModal').style.display = 'none';
+    };
+
+    async function loadReportsList() {
+        const listEl = document.getElementById('reportsList');
+        try {
+            const res = await fetch('/api/city_compare/reports');
+            const data = await res.json();
+            const reports = data.reports || [];
+            if (reports.length === 0) {
+                listEl.innerHTML = '<div class="reports-empty">暂无保存的报告</div>';
+                return;
+            }
+            listEl.innerHTML = reports.map(r => `
+                <div class="report-item">
+                    <div class="report-info">
+                        <div class="report-name">${r.report_name}</div>
+                        <div class="report-meta">
+                            <span class="report-cities">${r.city_a} ⇄ ${r.city_b}${r.city_ref ? '  [参照: ' + r.city_ref + ']' : ''}</span>
+                            <span class="report-date">${r.updated_at}</span>
+                        </div>
+                    </div>
+                    <div class="report-actions">
+                        <button class="report-action-btn action-open" onclick="openReport(${r.id})">打开</button>
+                        <button class="report-action-btn action-delete" onclick="deleteReport(${r.id}, '${r.report_name.replace(/'/g, "\\'")}')">删除</button>
+                    </div>
+                </div>
+            `).join('');
+        } catch (e) {
+            console.error(e);
+            listEl.innerHTML = '<div class="reports-empty">加载失败</div>';
+        }
+    }
+
+    window.openReport = async function(id) {
+        try {
+            const res = await fetch(`/api/city_compare/reports/${id}`);
+            const report = await res.json();
+            state.cityA = report.city_a;
+            state.cityB = report.city_b;
+            state.cityRef = report.city_ref || '';
+            state.period = report.period || '';
+            state.dimension = report.dimension;
+            state.savedReportId = id;
+
+            document.getElementById('cityASelect').value = report.city_a;
+            document.getElementById('cityBSelect').value = report.city_b;
+            document.getElementById('cityRefSelect').value = report.city_ref || '';
+            document.getElementById('periodSelect').value = report.period || '';
+            document.querySelectorAll('.cc-dim-tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.dim === report.dimension);
+            });
+
+            if (report.snapshot && Object.keys(report.snapshot).length > 0) {
+                state.currentData = report.snapshot.main_data;
+                state.brandData = report.snapshot.brand_data;
+                renderAll(report.snapshot.main_data);
+                renderBrandChart(report.snapshot.brand_data);
+            } else {
+                loadCompareData();
+            }
+            closeReportsModal();
+            showToast(`已加载报告: ${report.report_name}`, 'info');
+        } catch (e) {
+            console.error(e);
+            showToast('加载报告失败', 'danger');
+        }
+    };
+
+    window.deleteReport = function(id, name) {
+        showModal('删除确认', `确定要删除报告「${name}」吗？此操作不可撤销。`, function() {
+            fetch(`/api/city_compare/reports/${id}`, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(d => {
+                    if (d.status === 'deleted') {
+                        showToast('报告已删除', 'success');
+                        loadReportsList();
+                    } else {
+                        showToast(d.error || '删除失败', 'danger');
+                    }
+                })
+                .catch(() => showToast('删除失败', 'danger'));
+        });
+    };
+
+    function openSaveReportModal() {
+        const input = document.getElementById('reportNameInput');
+        const defaultName = `${state.cityA || '城市A'} vs ${state.cityB || '城市B'} 对比`;
+        input.value = state.savedReportId ? '' : defaultName;
+        input.placeholder = state.savedReportId ? '留空则更新当前报告' : '为报告起一个名字';
+        document.getElementById('saveReportModal').style.display = 'flex';
+        setTimeout(() => input.focus(), 100);
+    }
+
+    window.closeSaveReportModal = function() {
+        document.getElementById('saveReportModal').style.display = 'none';
+    };
+
+    window.confirmSaveReport = async function() {
+        if (!state.cityA || !state.cityB) {
+            showToast('请先选择两座城市', 'warning');
+            return;
+        }
+        const name = document.getElementById('reportNameInput').value.trim();
+        const snapshot = {
+            main_data: state.currentData,
+            brand_data: state.brandData
+        };
+        const payload = {
+            report_name: name || (state.cityA + ' vs ' + state.cityB + ' 对比'),
+            city_a: state.cityA,
+            city_b: state.cityB,
+            city_ref: state.cityRef,
+            period: state.period,
+            dimension: state.dimension,
+            snapshot: snapshot
+        };
+
+        try {
+            let res;
+            if (state.savedReportId && !name) {
+                res = await fetch(`/api/city_compare/reports/${state.savedReportId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ snapshot: snapshot, period: state.period, dimension: state.dimension })
+                });
+            } else {
+                res = await fetch('/api/city_compare/reports', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            }
+            const d = await res.json();
+            if (d.status === 'created' || d.status === 'updated') {
+                state.savedReportId = d.id || state.savedReportId;
+                closeSaveReportModal();
+                showToast(state.savedReportId ? '报告已更新' : '报告已保存', 'success');
+            } else {
+                showToast(d.error || '保存失败', 'danger');
+            }
+        } catch (e) {
+            console.error(e);
+            showToast('保存失败', 'danger');
+        }
+    };
+
+    // ========== 分享链接 ==========
+
+    function openShareFlow() {
+        if (!state.cityA || !state.cityB) {
+            showToast('请先选择两座城市进行对比', 'warning');
+            return;
+        }
+        const modal = document.getElementById('shareModal');
+        document.getElementById('shareResultArea').style.display = 'none';
+        document.getElementById('shareLoading').style.display = '';
+        modal.style.display = 'flex';
+
+        (async () => {
+            try {
+                if (!state.savedReportId) {
+                    const snapshot = { main_data: state.currentData, brand_data: state.brandData };
+                    const autoName = `${state.cityA} vs ${state.cityB} ${state.period || Date.now()}`;
+                    const createRes = await fetch('/api/city_compare/reports', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            report_name: autoName,
+                            city_a: state.cityA,
+                            city_b: state.cityB,
+                            city_ref: state.cityRef,
+                            period: state.period,
+                            dimension: state.dimension,
+                            snapshot: snapshot
+                        })
+                    });
+                    const cd = await createRes.json();
+                    if (!cd.id) throw new Error(cd.error || '保存失败');
+                    state.savedReportId = cd.id;
+                }
+                const shareRes = await fetch('/api/city_compare/share', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ report_id: state.savedReportId })
+                });
+                const sd = await shareRes.json();
+                if (!sd.token) throw new Error(sd.error || '生成失败');
+                const fullUrl = window.location.origin + sd.url;
+                document.getElementById('shareUrlInput').value = fullUrl;
+                document.getElementById('shareExpire').textContent = sd.expire_at;
+                document.getElementById('shareLoading').style.display = 'none';
+                document.getElementById('shareResultArea').style.display = '';
+            } catch (e) {
+                console.error(e);
+                document.getElementById('shareLoading').innerHTML = `<div style="color: #f43f5e;">生成失败: ${e.message || '请重试'}</div>`;
+            }
+        })();
+    }
+
+    window.closeShareModal = function() {
+        document.getElementById('shareModal').style.display = 'none';
+    };
+
+    window.copyShareUrl = function() {
+        const input = document.getElementById('shareUrlInput');
+        input.select();
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(input.value).then(() => {
+                    showToast('链接已复制到剪贴板', 'success');
+                }).catch(() => fallbackCopy(input.value));
+            } else {
+                fallbackCopy(input.value);
+            }
+        } catch (e) {
+            fallbackCopy(input.value);
+        }
+    };
+
+    function fallbackCopy(text) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+            document.execCommand('copy');
+            showToast('链接已复制到剪贴板', 'success');
+        } catch (e) {
+            showToast('复制失败，请手动选择文本复制', 'warning');
+        }
+        document.body.removeChild(ta);
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            ['reportsModal', 'saveReportModal', 'shareModal'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el && el.style.display === 'flex') el.style.display = 'none';
+            });
+        }
+    });
+
+    ['reportsModal', 'saveReportModal', 'shareModal'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('click', function(e) {
+                if (e.target === el) el.style.display = 'none';
+            });
+        }
+    });
+
+    window.addEventListener('load', init);
+})();
+</script>
+{% endblock %}

@@ -17,6 +17,7 @@
             <a href="{{ url_for('main.home') }}">数据大屏</a>
             <a href="{{ url_for('main.anxiety_index') }}">充电焦虑指数</a>
             <a href="{{ url_for('main.compare') }}">竞品对标</a>
+            <a href="{{ url_for('main.city_compare') }}">区域双城对比</a>
             <a href="{{ url_for('main.announcements_history') }}">公告中心</a>
             <a href="{{ url_for('main.preferences_page') }}">偏好设置</a>
             {% if current_user.role == 'admin' %}
