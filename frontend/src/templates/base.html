@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}{% endblock %} - 新能源汽车数据分析系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <nav class="navbar">
+        <div class="logo">NEV QUANTUM</div>
+        <div class="nav-links">
+            {% if current_user.is_authenticated %}
+            <a href="{{ url_for('main.home') }}">数据大屏</a>
+            {% if current_user.role == 'admin' %}
+            <a href="{{ url_for('main.admin_data') }}">数据管理</a>
+            <a href="{{ url_for('main.admin_users') }}">用户管理</a>
+            {% endif %}
+            <a href="{{ url_for('main.change_password') }}">修改密码</a>
+            <a href="{{ url_for('main.logout') }}">安全退出</a>
+            {% else %}
+            <a href="{{ url_for('main.login') }}">身份验证</a>
+            <a href="{{ url_for('main.register') }}">新用户注册</a>
+            {% endif %}
+        </div>
+    </nav>
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div
+            style="background: rgba(244, 63, 94, 0.2); padding: 15px; border-radius: 12px; margin-bottom: 20px; border: 1px solid rgba(244, 63, 94, 0.3);">
+            {{ message }}
+        </div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </div>
+    <div id="modalOverlay" class="modal-overlay">
+        <div class="modal">
+            <h4 id="modalTitle">确认操作</h4>
+            <p id="modalMsg"></p>
+            <div class="modal-actions">
+                <button id="modalCancel" class="btn" style="background: #334155;">取消</button>
+                <button id="modalConfirm" class="btn">确定</button>
+            </div>
+        </div>
+    </div>
+    <div id="toastContainer" class="toast-container"></div>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+
+</html>

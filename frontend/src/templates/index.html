@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}控制面板{% endblock %}
+{% block content %}
+<div class="filter-pane">
+    <div class="filter-group">
+        <label>品牌</label>
+        <select id="brandFilter">
+            <option value="">全部</option>
+            <option value="特斯拉">特斯拉</option>
+            <option value="比亚迪">比亚迪</option>
+            <option value="蔚来">蔚来</option>
+            <option value="小鹏">小鹏</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <label>城市</label>
+        <select id="cityFilter">
+            <option value="北京">北京</option>
+            <option value="上海">上海</option>
+            <option value="广东">广东</option>
+            <option value="浙江">浙江</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <label>价格 (万元)</label>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="number" id="priceMin" placeholder="最小" style="width: 80px;">
+            <span style="color: var(--text-secondary)">-</span>
+            <input type="number" id="priceMax" placeholder="最大" style="width: 80px;">
+        </div>
+    </div>
+    <div class="filter-group">
+        <label>续航 (km)</label>
+        <input type="number" id="rangeMin" placeholder="最小" style="width: 80px;">
+    </div>
+    <div class="filter-group">
+        <label>动力类型</label>
+        <div style="display: flex; gap: 15px; height: 38px; align-items: center;">
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px;">
+                <input type="checkbox" class="cat-filter" value="纯电" checked> 纯电
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px;">
+                <input type="checkbox" class="cat-filter" value="混动" checked> 混动
+            </label>
+        </div>
+    </div>
+    <div class="filter-group">
+        <label>表格排序</label>
+        <div style="display: flex; gap: 8px;">
+            <select id="sortField">
+                <option value="model_name">车型名称</option>
+                <option value="range">续航里程</option>
+                <option value="price">价格</option>
+                <option value="power">电耗</option>
+                <option value="sales">销量</option>
+            </select>
+            <select id="sortOrder">
+                <option value="asc">升序</option>
+                <option value="desc">降序</option>
+            </select>
+        </div>
+    </div>
+    <div class="filter-group">
+        <label>地图维度</label>
+        <select id="mapMode">
+            <option value="sales">销量热力分布</option>
+            <option value="density">充电桩密度</option>
+        </select>
+    </div>
+    <button onclick="refreshCharts()" class="btn">加载数据</button>
+    {% if current_user.role == 'admin' %}
+    <button onclick="initDB()" class="btn btn-danger" style="margin-left: auto;">重置模拟数据</button>
+    {% endif %}
+</div>
+
+<div class="dashboard-grid">
+    <!-- Bar Chart -->
+    <div class="chart-card col-8">
+        <h3>车型参数多维对比</h3>
+        <div id="barChart" class="chart-box" style="height: 380px;"></div>
+        <div class="dashboard-table-container" style="max-height: 240px;">
+            <table class="dashboard-table">
+                <thead>
+                    <tr>
+                        <th>车型</th>
+                        <th>续航</th>
+                        <th>价格</th>
+                        <th>电耗</th>
+                    </tr>
+                </thead>
+                <tbody id="dashboardTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Pie Chart -->
+    <div class="chart-card col-4">
+        <h3>区域品牌份额分布</h3>
+        <div id="pieChart" class="chart-box"></div>
+    </div>
+
+    <!-- Line Chart -->
+    <div class="chart-card col-12">
+        <h3>季度销售量增长趋势</h3>
+        <div id="lineChart" class="chart-box"></div>
+    </div>
+
+    <!-- Map Chart -->
+    <div class="chart-card col-6">
+        <h3>全国销售热力分布</h3>
+        <div id="mapChart" class="chart-box"></div>
+    </div>
+
+    <!-- Scatter Chart -->
+    <div class="chart-card col-6">
+        <h3>价格与续航相关性分析</h3>
+        <div id="scatterChart" class="chart-box"></div>
+    </div>
+</div>
+{% endblock %}

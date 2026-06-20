@@ -1,0 +1,305 @@
+// ECharts Dark Theme Configuration
+const echartsTheme = {
+    color: ['#38bdf8', '#818cf8', '#c084fc', '#f472b6', '#fbbf24', '#10b981'],
+    textStyle: { color: '#94a3b8' }
+};
+
+let charts = {};
+let currentSelection = {
+    brand: '',
+    city: '北京',
+    drillDown: false // Clicked a brand in bar chart
+};
+
+function initCharts() {
+    const ids = ['barChart', 'pieChart', 'lineChart', 'scatterChart', 'mapChart'];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) charts[id] = echarts.init(el);
+    });
+
+    // Interaction Events
+    if (charts.barChart) {
+        charts.barChart.on('click', function (params) {
+            // Drill down: If brand filter is empty, and user clicks a model, 
+            // maybe we extract the brand or just set the brand filter to that specific brand.
+            // Simplified: Filter everything by this brand
+            const brandSelect = document.getElementById('brandFilter');
+            // Check if name is a brand or a specific model. 
+            // In our current API, labels are model names. We might need brand info.
+            // For this version: just toast and filter by brand if it matches known brands.
+            const brands = ['特斯拉', '比亚迪', '蔚来', '小鹏'];
+            if (brands.includes(params.name)) {
+                brandSelect.value = params.name;
+                refreshCharts();
+            } else {
+                // It's a model name. We can find the brand? 
+                // Let's assume user wants to filter by this specific selection.
+            }
+        });
+    }
+
+    if (charts.pieChart) {
+        charts.pieChart.on('click', function (params) {
+            document.getElementById('brandFilter').value = params.name;
+            refreshCharts();
+            showToast(`已筛选品牌: ${params.name}`, 'info');
+        });
+    }
+}
+
+function getFilterParams() {
+    const brand = document.getElementById('brandFilter').value;
+    const city = document.getElementById('cityFilter').value;
+    const pMin = document.getElementById('priceMin').value;
+    const pMax = document.getElementById('priceMax').value;
+    const rMin = document.getElementById('rangeMin').value;
+
+    const categories = Array.from(document.querySelectorAll('.cat-filter:checked')).map(cb => cb.value);
+
+    const sortField = document.getElementById('sortField').value;
+    const sortOrder = document.getElementById('sortOrder').value;
+
+    let url = `?brand=${brand}&city=${city}&price_min=${pMin}&price_max=${pMax}&range_min=${rMin}&sort_field=${sortField}&sort_order=${sortOrder}`;
+    categories.forEach(c => url += `&category[]=${c}`);
+    return url;
+}
+
+async function loadBarChart() {
+    const params = getFilterParams();
+    const res = await fetch(`/api/chart/bar${params}`);
+    const data = await res.json();
+
+    const brand = document.getElementById('brandFilter').value;
+
+    const tbody = document.getElementById('dashboardTableBody');
+    if (tbody) {
+        tbody.innerHTML = data.models.map((m, i) => `
+            <tr>
+                <td style="color: #fff; font-weight: 500;">${m}</td>
+                <td>${data.range[i]} km</td>
+                <td>${data.price[i]} 万</td>
+                <td>${data.power[i]}</td>
+            </tr>
+        `).join('');
+    }
+
+    charts.barChart.setOption({
+        tooltip: { trigger: 'axis', backgroundColor: '#1e293b', borderColor: '#334155', textStyle: { color: '#fff' } },
+        legend: { data: ['续航 (km)', '价格 (万元)', '百公里电耗'], textStyle: { color: '#94a3b8' }, top: 'bottom' },
+        xAxis: { type: 'category', data: data.models, axisLabel: { color: '#94a3b8', interval: 0, rotate: 30 } },
+        yAxis: { splitLine: { lineStyle: { color: '#334155' } } },
+        grid: { bottom: '20%' },
+        series: [
+            { name: '续航 (km)', type: 'bar', data: data.range, itemStyle: { borderRadius: [4, 4, 0, 0] } },
+            { name: '价格 (万元)', type: 'bar', data: data.price, itemStyle: { borderRadius: [4, 4, 0, 0] } },
+            { name: '百公里电耗', type: 'bar', data: data.power, itemStyle: { borderRadius: [4, 4, 0, 0] } }
+        ]
+    });
+}
+
+async function loadLineChart() {
+    const brand = document.getElementById('brandFilter').value;
+    const res = await fetch(`/api/chart/line?brand=${brand}`);
+    const data = await res.json();
+
+    charts.lineChart.setOption({
+        title: { text: brand ? `${brand} 销量趋势` : '全行业销量趋势', textStyle: { color: '#94a3b8', fontSize: 14 } },
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: data.periods, boundaryGap: false },
+        yAxis: { type: 'value', splitLine: { lineStyle: { color: '#334155' } } },
+        series: [{
+            name: '销量',
+            data: data.sales,
+            type: 'line',
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 8,
+            lineStyle: { width: 4, color: '#38bdf8' },
+            areaStyle: {
+                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                    { offset: 0, color: 'rgba(56, 189, 248, 0.4)' },
+                    { offset: 1, color: 'rgba(56, 189, 248, 0)' }
+                ])
+            }
+        }]
+    }, true);
+}
+
+async function loadPieChart() {
+    const city = document.getElementById('cityFilter').value;
+    const res = await fetch(`/api/chart/pie?city=${city}`);
+    const data = await res.json();
+
+    charts.pieChart.setOption({
+        title: { text: `${city} 品牌占比`, left: 'center', textStyle: { color: '#94a3b8', fontSize: 14 } },
+        tooltip: { trigger: 'item' },
+        series: [{
+            type: 'pie',
+            radius: ['40%', '70%'],
+            avoidLabelOverlap: false,
+            itemStyle: { borderRadius: 10, borderColor: '#1e293b', borderWidth: 2 },
+            label: { show: false },
+            emphasis: { label: { show: true, fontSize: 16, fontWeight: 'bold', color: '#fff' } },
+            data: data
+        }]
+    });
+}
+
+async function loadScatterChart() {
+    const params = getFilterParams();
+    const res = await fetch(`/api/chart/scatter${params}`);
+    const data = await res.json();
+
+    charts.scatterChart.setOption({
+        title: { text: '车身重量与电耗相关性', textStyle: { color: '#94a3b8', fontSize: 14 } },
+        tooltip: {
+            formatter: params => `${params.data[2]}<br/>重量: ${params.data[0]}kg<br/>电耗: ${params.data[1]}kWh/100km`
+        },
+        xAxis: { name: '重量 (kg)', splitLine: { lineStyle: { color: '#334155' } } },
+        yAxis: { name: '电耗 (kWh)', splitLine: { lineStyle: { color: '#334155' } } },
+        series: [{
+            symbolSize: (data) => Math.sqrt(data[0]) / 2,
+            data: data.weight_power,
+            type: 'scatter',
+            itemStyle: { color: '#f472b6', shadowBlur: 10, shadowColor: 'rgba(244, 114, 182, 0.5)' }
+        }]
+    });
+}
+let mapGeoCache = null;
+
+async function loadMapChart() {
+    const mapMode = document.getElementById('mapMode').value;
+    const params = getFilterParams();
+    const res = await fetch(`/api/chart/map${params}&mode=${mapMode}`);
+    const data = await res.json();
+
+    const mapUrl = 'https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json';
+
+    try {
+        if (!mapGeoCache) {
+            const mapRes = await fetch(mapUrl);
+            mapGeoCache = await mapRes.json();
+            echarts.registerMap('china', mapGeoCache);
+        }
+
+        const vals = data.data.map(d => d.value).filter(v => v > 0);
+        const maxVal = vals.length > 0 ? Math.max(...vals) : (mapMode === 'density' ? 50 : 20000);
+
+        charts.mapChart.setOption({
+            title: { text: data.title + ' (可滚轮缩放)', textStyle: { color: '#94a3b8', fontSize: 14 } },
+            visualMap: {
+                min: 0, max: maxVal > 0 ? maxVal : 100, left: 'right', top: 'bottom', text: ['高', '低'],
+                calculable: true, inRange: { color: ['#1e293b', '#38bdf8', '#818cf8'] },
+                textStyle: { color: '#94a3b8' }
+            },
+            tooltip: {
+                trigger: 'item',
+                formatter: function (params) {
+                    const val = params.value ? params.value : 0;
+                    const unit = mapMode === 'density' ? '个/km²' : '辆';
+                    return `${params.name}<br/>${mapMode === 'density' ? '密度' : '销量'}: ${val} ${unit}`;
+                }
+            },
+            series: [{
+                name: mapMode === 'density' ? '密度' : '销量', type: 'map', mapType: 'china', roam: true,
+                emphasis: { label: { color: '#fff' }, itemStyle: { areaColor: '#a78bfa' } },
+                data: data.data
+            }]
+        });
+    } catch (e) {
+        console.error('Map loading failed:', e);
+        showToast('地图加载失败，请检查网络', 'danger');
+    }
+}
+
+function refreshCharts() {
+    loadBarChart();
+    loadLineChart();
+    loadPieChart();
+    loadScatterChart();
+    loadMapChart();
+}
+
+// Add event listeners for automatic refreshing
+window.addEventListener('load', () => {
+    initCharts();
+    if (charts.barChart) {
+        refreshCharts();
+
+        // Auto-refresh when dropdowns change
+        const autoFilters = ['brandFilter', 'cityFilter', 'sortField', 'sortOrder', 'mapMode'];
+        autoFilters.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.onchange = refreshCharts;
+        });
+
+        // Auto-refresh for checkboxes
+        document.querySelectorAll('.cat-filter').forEach(cb => {
+            cb.onchange = refreshCharts;
+        });
+
+        // Debounced refresh for number inputs
+        let debounceTimer;
+        const numInputs = ['priceMin', 'priceMax', 'rangeMin'];
+        numInputs.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.oninput = () => {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(refreshCharts, 500);
+            };
+        });
+    }
+});
+
+// Custom UI Components
+function showToast(msg, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.style.borderLeftColor = type === 'success' ? '#10b981' : (type === 'danger' ? '#f43f5e' : '#38bdf8');
+    toast.innerHTML = `<span>${msg}</span>`;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(100%)';
+        setTimeout(() => toast.remove(), 400);
+    }, 3000);
+}
+
+function showModal(title, msg, onConfirm) {
+    const overlay = document.getElementById('modalOverlay');
+    document.getElementById('modalTitle').innerText = title;
+    document.getElementById('modalMsg').innerText = msg;
+    overlay.style.display = 'flex';
+
+    const confirmBtn = document.getElementById('modalConfirm');
+    const cancelBtn = document.getElementById('modalCancel');
+
+    const close = () => overlay.style.display = 'none';
+
+    confirmBtn.onclick = () => { onConfirm(); close(); };
+    cancelBtn.onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+}
+
+function initDB() {
+    showModal('重置数据库', '确定要删除现有记录并初始化模拟数据吗？', () => {
+        fetch('/admin/init_db')
+            .then(r => r.json())
+            .then(d => {
+                showToast(d.status, 'success');
+                refreshCharts();
+            })
+            .catch(() => showToast('初始化失败', 'danger'));
+    });
+}
+
+window.addEventListener('load', () => {
+    initCharts();
+    if (charts.barChart) refreshCharts();
+});
+
+window.addEventListener('resize', () => {
+    Object.values(charts).forEach(c => c.resize());
+});

@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}数据管理{% endblock %}
+{% block content %}
+<div class="filter-pane">
+    <h3><i class="icon"></i> 车型数据管理</h3>
+    <button onclick="openAddModal()" class="btn" style="margin-left: auto;">新增车型</button>
+</div>
+
+<div class="chart-card col-12" style="height: auto; min-height: 500px; padding: 0;">
+    <div class="dashboard-table-container" style="max-height: none; border: none; background: transparent;">
+        <table class="dashboard-table">
+            <thead>
+                <tr>
+                    <th style="padding-left: 24px;">品牌</th>
+                    <th>型号</th>
+                    <th>价格 (万)</th>
+                    <th>续航 (km)</th>
+                    <th>电耗</th>
+                    <th>重量 (kg)</th>
+                    <th>类型</th>
+                    <th style="text-align: right; padding-right: 24px;">操作</th>
+                </tr>
+            </thead>
+            <tbody id="carTableBody">
+                <!-- Data loaded via JS -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div id="carModal" class="modal-overlay">
+    <div class="modal" style="width: 500px; text-align: left;">
+        <h4 id="carModalTitle">编辑车型资料</h4>
+        <input type="hidden" id="carId">
+        <div class="form-group">
+            <label>品牌</label>
+            <input type="text" id="carBrand" required>
+        </div>
+        <div class="form-group">
+            <label>型号</label>
+            <input type="text" id="carModel" required>
+        </div>
+        <div class="form-group" style="display: flex; gap: 15px;">
+            <div style="flex: 1">
+                <label>价格 (万)</label>
+                <input type="number" id="carPrice" step="0.1" required>
+            </div>
+            <div style="flex: 1">
+                <label>续航 (km)</label>
+                <input type="number" id="carRange" required>
+            </div>
+        </div>
+        <div class="form-group" style="display: flex; gap: 15px;">
+            <div style="flex: 1">
+                <label>电耗 (kWh)</label>
+                <input type="number" id="carPower" step="0.1" required>
+            </div>
+            <div style="flex: 1">
+                <label>重量 (kg)</label>
+                <input type="number" id="carWeight" required>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>动力类型</label>
+            <select id="carCategory" style="width: 100%">
+                <option value="纯电">纯电</option>
+                <option value="混动">混动</option>
+            </select>
+        </div>
+        <div class="modal-actions" style="margin-top: 30px;">
+            <button onclick="closeCarModal()" class="btn" style="background: #334155;">取消</button>
+            <button onclick="saveCar()" class="btn">提交保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function loadCars() {
+        const res = await fetch('/api/admin/cars');
+        const cars = await res.json();
+        const tbody = document.getElementById('carTableBody');
+        tbody.innerHTML = cars.map(c => `
+            <tr>
+                <td style="padding-left: 24px;">${c.brand}</td>
+                <td>${c.model_name}</td>
+                <td>${c.price}</td>
+                <td>${c.range_km}</td>
+                <td>${c.power}</td>
+                <td>${c.weight}</td>
+                <td>${c.category}</td>
+                <td style="text-align: right; padding-right: 24px;">
+                    <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                        <button onclick='openEditModal(${JSON.stringify(c)})' class="btn" style="padding: 5px 12px; font-size: 12px; border-radius: 6px;">编辑</button>
+                        <button onclick="deleteCar(${c.id})" class="btn btn-danger" style="padding: 5px 12px; font-size: 12px; border-radius: 6px;">删除</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function openAddModal() {
+        document.getElementById('carModalTitle').innerText = '新增车型资料';
+        document.getElementById('carId').value = '';
+        document.getElementById('carBrand').value = '';
+        document.getElementById('carModel').value = '';
+        document.getElementById('carPrice').value = '';
+        document.getElementById('carRange').value = '';
+        document.getElementById('carPower').value = '';
+        document.getElementById('carWeight').value = '';
+        document.getElementById('carCategory').value = '纯电';
+        document.getElementById('carModal').style.display = 'flex';
+    }
+
+    function openEditModal(c) {
+        document.getElementById('carModalTitle').innerText = '编辑车型资料';
+        document.getElementById('carId').value = c.id;
+        document.getElementById('carBrand').value = c.brand;
+        document.getElementById('carModel').value = c.model_name;
+        document.getElementById('carPrice').value = c.price;
+        document.getElementById('carRange').value = c.range_km;
+        document.getElementById('carPower').value = c.power;
+        document.getElementById('carWeight').value = c.weight;
+        document.getElementById('carCategory').value = c.category;
+        document.getElementById('carModal').style.display = 'flex';
+    }
+
+    function closeCarModal() {
+        document.getElementById('carModal').style.display = 'none';
+    }
+
+    async function saveCar() {
+        const id = document.getElementById('carId').value;
+        const data = {
+            brand: document.getElementById('carBrand').value,
+            model_name: document.getElementById('carModel').value,
+            price: document.getElementById('carPrice').value,
+            range_km: document.getElementById('carRange').value,
+            power: document.getElementById('carPower').value,
+            weight: document.getElementById('carWeight').value,
+            category: document.getElementById('carCategory').value
+        };
+
+        const url = id ? `/api/admin/cars/${id}` : '/api/admin/cars';
+        const method = id ? 'PUT' : 'POST';
+
+        const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        if (res.ok) {
+            showToast('保存成功', 'success');
+            closeCarModal();
+            loadCars();
+        } else {
+            showToast('保存失败', 'danger');
+        }
+    }
+
+    async function deleteCar(id) {
+        showModal('确认删除', '确定要删除这条车型记录吗？', async () => {
+            const res = await fetch(`/api/admin/cars/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                showToast('已删除', 'success');
+                loadCars();
+            } else {
+                showToast('删除失败', 'danger');
+            }
+        });
+    }
+
+    window.addEventListener('load', loadCars);
+</script>
+{% endblock %}

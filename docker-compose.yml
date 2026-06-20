@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  web:
+    build: ./backend
+    ports:
+      - "12903:5000"
+    volumes:
+      - ./backend:/app
+      - ./frontend:/frontend
+      - ./database:/database
+    environment:
+      - FLASK_APP=run.py
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    restart: always
