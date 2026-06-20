@@ -8,17 +8,22 @@ let charts = {};
 let currentSelection = {
     brand: '',
     city: '北京',
-    drillDown: false // Clicked a brand in bar chart
+    drillDown: false
+};
+
+let priceDistState = {
+    customBins: null,
+    selectedInterval: null,
+    collapsed: false
 };
 
 function initCharts() {
-    const ids = ['barChart', 'pieChart', 'lineChart', 'scatterChart', 'mapChart'];
+    const ids = ['barChart', 'pieChart', 'lineChart', 'scatterChart', 'mapChart', 'priceDistChart'];
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (el) charts[id] = echarts.init(el);
     });
 
-    // Interaction Events
     if (charts.barChart) {
         charts.barChart.on('click', function (params) {
             if (params.componentType === 'series' && params.name) {
@@ -47,6 +52,18 @@ function initCharts() {
             document.getElementById('brandFilter').value = params.name;
             refreshCharts();
             showToast(`已筛选品牌: ${params.name}`, 'info');
+        });
+    }
+
+    if (charts.priceDistChart) {
+        charts.priceDistChart.on('click', function (params) {
+            if (params.componentType === 'series' && params.seriesName !== '上季度') {
+                const interval = priceDistState.currentData && priceDistState.currentData.intervals
+                    ? priceDistState.currentData.intervals[params.dataIndex] : null;
+                if (interval) {
+                    selectPriceRange(interval);
+                }
+            }
         });
     }
 }
@@ -225,6 +242,7 @@ function refreshCharts() {
     loadPieChart();
     loadScatterChart();
     loadMapChart();
+    loadPriceDistChart();
 }
 
 let _pendingPrefConfig = null;
@@ -1272,4 +1290,540 @@ window.addEventListener('load', () => {
         if (originalRefresh) originalRefresh.apply(this, arguments);
         setTimeout(checkSidebarVisibilityInFilters, 300);
     };
+});
+
+/* ========== 价格带分布 Price Distribution ========== */
+
+async function loadPriceDistChart() {
+    if (!charts.priceDistChart) return;
+    let params = getFilterParams();
+    if (priceDistState.customBins && priceDistState.customBins.length > 0) {
+        const binsStr = priceDistState.customBins.join(',');
+        params += params.includes('?') ? '&' : '?';
+        params += `bins=${encodeURIComponent(binsStr)}`;
+    }
+    try {
+        const res = await fetch(`/api/chart/price_distribution${params}`);
+        if (!res.ok) throw new Error('Network error');
+        const data = await res.json();
+        priceDistState.currentData = data;
+        priceDistState.currentBins = data.bins || [];
+        renderPriceDistChart(data);
+        updatePriceDistSummary(data.summary);
+    } catch (e) {
+        console.error('Load price distribution failed:', e);
+    }
+}
+
+function renderPriceDistChart(data) {
+    if (!charts.priceDistChart || !data.intervals) return;
+    const intervals = data.intervals;
+    const labels = intervals.map(i => i.label);
+    const bevData = intervals.map(i => i.bev_count);
+    const phevData = intervals.map(i => i.phev_count);
+    const prevData = intervals.map(i => i.prev_count || 0);
+    const totalData = intervals.map(i => i.total_count);
+    const medianData = intervals.map((i, idx) => {
+        if (i.median_price == null) return null;
+        const barTotal = bevData[idx] + phevData[idx];
+        return {
+            value: i.median_price,
+            xAxis: idx,
+            yAxis: barTotal,
+            _label: `${i.median_price}万`
+        };
+    }).filter(x => x != null);
+
+    const tooltipStyle = {
+        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+        borderColor: 'rgba(56, 189, 248, 0.3)',
+        borderWidth: 1,
+        textStyle: { color: '#e2e8f0', fontSize: 12, lineHeight: 18 }
+    };
+
+    const option = {
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'shadow' },
+            ...tooltipStyle,
+            formatter: function (params) {
+                if (!params || params.length === 0) return '';
+                const dataIndex = params[0].dataIndex;
+                const iv = intervals[dataIndex];
+                if (!iv) return '';
+                const total = iv.total_count;
+                const bevCount = iv.bev_count;
+                const phevCount = iv.phev_count;
+                const bevPct = total > 0 ? ((bevCount / total) * 100).toFixed(1) : 0;
+                const phevPct = total > 0 ? ((phevCount / total) * 100).toFixed(1) : 0;
+                const avgRange = iv.avg_range ? `${Number(iv.avg_range).toFixed(0)} km` : '—';
+                const avgPower = iv.avg_power ? `${Number(iv.avg_power).toFixed(1)} kWh/100km` : '—';
+                const medianPrice = iv.median_price != null ? `${Number(iv.median_price).toFixed(1)} 万` : '—';
+                const prevCount = iv.prev_count != null ? iv.prev_count : 0;
+                const diffSign = total >= prevCount ? '▲' : '▼';
+                const diffColor = total >= prevCount ? '#10b981' : '#f43f5e';
+                let diffPct = prevCount > 0 ? (((total - prevCount) / prevCount) * 100) : 0;
+                diffPct = Math.abs(diffPct).toFixed(1);
+
+                let topBrandsHtml = '';
+                if (iv.top_brands && iv.top_brands.length > 0) {
+                    topBrandsHtml = `<div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(148,163,184,0.2);">
+                        <div style="color:#94a3b8; font-size:11px; margin-bottom:6px; font-weight:600; letter-spacing:0.5px;">🏆 销量TOP3品牌</div>
+                        ${iv.top_brands.map((b, i) => `
+                            <div style="display:flex; justify-content:space-between; padding:3px 0; font-size:12px;">
+                                <span style="color:#cbd5e1;">
+                                    <span style="display:inline-block; width:16px; text-align:center; font-weight:700; color:${['#fbbf24','#94a3b8','#d97706'][i] || '#94a3b8'};">${i + 1}</span>
+                                    ${b.brand}
+                                </span>
+                                <span style="color:#f472b6; font-weight:600;">${Number(b.sales).toLocaleString()} 台</span>
+                            </div>
+                        `).join('')}
+                    </div>`;
+                }
+
+                return `
+                    <div style="min-width:260px;">
+                        <div style="font-size:14px; font-weight:700; color:#fff; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid rgba(148,163,184,0.2);">
+                            <span style="color:#818cf8;">💰</span> 价格区间：${iv.label} 万元
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px 16px;">
+                            <div style="color:#94a3b8; font-size:12px;">车型总数</div>
+                            <div style="color:#fff; font-weight:700; text-align:right;">${total} 台 <span style="color:${diffColor}; font-size:11px; margin-left:4px;">${diffSign}${diffPct}%</span></div>
+                            <div style="color:#94a3b8; font-size:12px;">纯电 <span style="color:#38bdf8;">●</span></div>
+                            <div style="color:#38bdf8; font-weight:600; text-align:right;">${bevCount} 台 (${bevPct}%)</div>
+                            <div style="color:#94a3b8; font-size:12px;">混动 <span style="color:#f472b6;">●</span></div>
+                            <div style="color:#f472b6; font-weight:600; text-align:right;">${phevCount} 台 (${phevPct}%)</div>
+                            <div style="color:#94a3b8; font-size:12px;">区间中位价</div>
+                            <div style="color:#fbbf24; font-weight:700; text-align:right;">${medianPrice}</div>
+                            <div style="color:#94a3b8; font-size:12px;">平均续航</div>
+                            <div style="color:#10b981; font-weight:600; text-align:right;">${avgRange}</div>
+                            <div style="color:#94a3b8; font-size:12px;">平均电耗</div>
+                            <div style="color:#a78bfa; font-weight:600; text-align:right;">${avgPower}</div>
+                        </div>
+                        ${topBrandsHtml}
+                    </div>
+                `;
+            }
+        },
+        legend: {
+            data: ['纯电', '混动', '上季度'],
+            textStyle: { color: '#94a3b8', fontSize: 12 },
+            top: 0,
+            right: 10,
+            itemWidth: 14,
+            itemHeight: 10,
+            itemGap: 18
+        },
+        grid: {
+            left: 50,
+            right: 30,
+            top: 50,
+            bottom: 60,
+            containLabel: false
+        },
+        xAxis: {
+            type: 'category',
+            data: labels,
+            axisLabel: {
+                color: '#94a3b8',
+                fontSize: 11,
+                interval: 0,
+                rotate: 25,
+                margin: 10
+            },
+            axisLine: { lineStyle: { color: '#475569' } },
+            axisTick: { show: false },
+            splitLine: { show: false }
+        },
+        yAxis: {
+            type: 'value',
+            name: '车型数量',
+            nameTextStyle: { color: '#64748b', fontSize: 11, padding: [0, 0, 10, -20] },
+            axisLabel: { color: '#94a3b8', fontSize: 11 },
+            axisLine: { show: false },
+            axisTick: { show: false },
+            splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.08)', type: 'dashed' } },
+            minInterval: 1
+        },
+        series: [
+            {
+                name: '纯电',
+                type: 'bar',
+                stack: 'total',
+                barWidth: '42%',
+                barGap: '-100%',
+                z: 3,
+                data: bevData,
+                itemStyle: {
+                    color: {
+                        type: 'linear',
+                        x: 0, y: 0, x2: 0, y2: 1,
+                        colorStops: [
+                            { offset: 0, color: 'rgba(56, 189, 248, 0.95)' },
+                            { offset: 1, color: 'rgba(56, 189, 248, 0.55)' }
+                        ]
+                    },
+                    borderRadius: [0, 0, 0, 0]
+                },
+                emphasis: {
+                    focus: 'series',
+                    itemStyle: {
+                        color: {
+                            type: 'linear',
+                            x: 0, y: 0, x2: 0, y2: 1,
+                            colorStops: [
+                                { offset: 0, color: 'rgba(125, 211, 252, 1)' },
+                                { offset: 1, color: 'rgba(56, 189, 248, 0.75)' }
+                            ]
+                        },
+                        shadowBlur: 12,
+                        shadowColor: 'rgba(56, 189, 248, 0.5)'
+                    }
+                },
+                markLine: {
+                    silent: true,
+                    symbol: 'none',
+                    animation: false,
+                    lineStyle: {
+                        type: 'dashed',
+                        width: 1.5
+                    },
+                    label: {
+                        formatter: '{b}',
+                        fontSize: 10,
+                        color: '#fbbf24',
+                        backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                        borderColor: 'rgba(251, 191, 36, 0.3)',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        padding: [3, 6],
+                        position: 'start',
+                        distance: 2
+                    },
+                    data: intervals.map((iv, idx) => {
+                        const barTotal = bevData[idx] + phevData[idx];
+                        if (iv.median_price == null || barTotal === 0) return null;
+                        return {
+                            name: `中${iv.median_price}万`,
+                            xAxis: idx,
+                            yAxis: barTotal,
+                            lineStyle: {
+                                color: 'rgba(251, 191, 36, 0.6)',
+                                type: 'dashed',
+                                width: 1.5
+                            }
+                        };
+                    }).filter(x => x != null)
+                }
+            },
+            {
+                name: '混动',
+                type: 'bar',
+                stack: 'total',
+                barWidth: '42%',
+                z: 3,
+                data: phevData,
+                itemStyle: {
+                    color: {
+                        type: 'linear',
+                        x: 0, y: 0, x2: 0, y2: 1,
+                        colorStops: [
+                            { offset: 0, color: 'rgba(244, 114, 182, 0.95)' },
+                            { offset: 1, color: 'rgba(244, 114, 182, 0.55)' }
+                        ]
+                    },
+                    borderRadius: [4, 4, 0, 0]
+                },
+                emphasis: {
+                    focus: 'series',
+                    itemStyle: {
+                        color: {
+                            type: 'linear',
+                            x: 0, y: 0, x2: 0, y2: 1,
+                            colorStops: [
+                                { offset: 0, color: 'rgba(249, 168, 212, 1)' },
+                                { offset: 1, color: 'rgba(244, 114, 182, 0.75)' }
+                            ]
+                        },
+                        shadowBlur: 12,
+                        shadowColor: 'rgba(244, 114, 182, 0.5)'
+                    }
+                }
+            },
+            {
+                name: '上季度',
+                type: 'bar',
+                barWidth: '42%',
+                barGap: '-100%',
+                z: 1,
+                data: prevData,
+                itemStyle: {
+                    color: {
+                        type: 'linear',
+                        x: 0, y: 0, x2: 0, y2: 1,
+                        colorStops: [
+                            { offset: 0, color: 'rgba(148, 163, 184, 0.18)' },
+                            { offset: 1, color: 'rgba(148, 163, 184, 0.06)' }
+                        ]
+                    },
+                    borderColor: 'rgba(148, 163, 184, 0.35)',
+                    borderWidth: 1,
+                    borderType: 'dashed',
+                    borderRadius: [4, 4, 0, 0]
+                },
+                silent: true
+            }
+        ]
+    };
+
+    charts.priceDistChart.setOption(option, true);
+}
+
+function updatePriceDistSummary(summary) {
+    if (!summary) return;
+    const card = document.getElementById('priceDistCard');
+    if (!card) return;
+
+    const sampleCount = summary.sample_count || 0;
+    const priceMin = summary.price_min != null ? Number(summary.price_min).toFixed(0) : '—';
+    const priceMax = summary.price_max != null ? Number(summary.price_max).toFixed(0) : '—';
+    const mostInterval = summary.most_interval || '—';
+    const mostCount = summary.most_count || 0;
+
+    const html = `
+        <div class="pd-summary-item">
+            <span class="pd-summary-label">📊 样本</span>
+            <span class="pd-summary-value">${sampleCount} 款</span>
+        </div>
+        <span class="pd-summary-divider">|</span>
+        <div class="pd-summary-item">
+            <span class="pd-summary-label">💰 跨度</span>
+            <span class="pd-summary-value">${priceMin} ~ ${priceMax} 万</span>
+        </div>
+        <span class="pd-summary-divider">|</span>
+        <div class="pd-summary-item">
+            <span class="pd-summary-label">🎯 集中区</span>
+            <span class="pd-summary-value pd-highlight">${mostInterval}</span>
+            <span style="color:var(--text-secondary);font-size:11px;">(${mostCount}款)</span>
+        </div>
+    `;
+    const el = card.querySelector('.price-dist-summary');
+    if (el) el.innerHTML = html;
+}
+
+function selectPriceRange(interval) {
+    if (!interval) return;
+    const pMinEl = document.getElementById('priceMin');
+    const pMaxEl = document.getElementById('priceMax');
+    if (!pMinEl || !pMaxEl) return;
+    pMinEl.value = interval.low;
+    pMaxEl.value = interval.high;
+
+    priceDistState.selectedInterval = { ...interval, _ts: Date.now() };
+    renderQuickTags();
+    refreshCharts();
+    showToast(`已锁定价格带：${interval.label} 万元`, 'info');
+}
+
+function clearPriceRangeFilter() {
+    const pMinEl = document.getElementById('priceMin');
+    const pMaxEl = document.getElementById('priceMax');
+    if (pMinEl) pMinEl.value = '';
+    if (pMaxEl) pMaxEl.value = '';
+    priceDistState.selectedInterval = null;
+    renderQuickTags();
+    refreshCharts();
+}
+
+function removeQuickTag() {
+    clearPriceRangeFilter();
+}
+
+function renderQuickTags() {
+    const container = document.getElementById('pdQuickTags');
+    if (!container) return;
+    if (!priceDistState.selectedInterval) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return;
+    }
+    container.style.display = 'flex';
+    const iv = priceDistState.selectedInterval;
+    container.innerHTML = `
+        <span class="pd-quick-label">🎯 已锁定：</span>
+        <div class="pd-quick-tags-list">
+            <span class="pd-quick-tag" title="点击重新应用此价格带">
+                💰 ${iv.label} 万
+                <span class="pd-quick-tag-close" id="pdTagClose" title="清除价格筛选">✕</span>
+            </span>
+        </div>
+        <button class="pd-clear-tags" id="pdClearTagsBtn">重置</button>
+    `;
+    const tagEl = container.querySelector('.pd-quick-tag');
+    if (tagEl) tagEl.onclick = (e) => {
+        if (e.target.classList.contains('pd-quick-tag-close')) return;
+        selectPriceRange(iv);
+    };
+    const closeBtn = document.getElementById('pdTagClose');
+    if (closeBtn) closeBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeQuickTag();
+    };
+    const clearBtn = document.getElementById('pdClearTagsBtn');
+    if (clearBtn) clearBtn.onclick = clearPriceRangeFilter;
+}
+
+function togglePriceDistCard() {
+    const card = document.getElementById('priceDistCard');
+    if (!card) return;
+    priceDistState.collapsed = !priceDistState.collapsed;
+    card.classList.toggle('collapsed', priceDistState.collapsed);
+    const icon = document.getElementById('pdToggleIcon');
+    if (icon) icon.innerHTML = priceDistState.collapsed ? '&#9658;' : '&#9660;';
+    if (!priceDistState.collapsed && charts.priceDistChart) {
+        setTimeout(() => charts.priceDistChart.resize(), 320);
+    }
+}
+
+function openBinEditor() {
+    const bins = priceDistState.currentBins || [0, 15, 25, 35, 50, 80, 120, 200];
+    const modal = document.getElementById('binEditorModal');
+    const input = document.getElementById('binEditorInput');
+    if (!modal || !input) return;
+    input.value = bins.join(', ');
+    renderBinEditorPreview();
+    modal.style.display = 'flex';
+
+    input.oninput = renderBinEditorPreview;
+    input.onkeydown = (e) => {
+        if (e.key === 'Enter') applyCustomBins();
+        if (e.key === 'Escape') closeBinEditor();
+    };
+}
+
+function closeBinEditor() {
+    const modal = document.getElementById('binEditorModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function renderBinEditorPreview() {
+    const input = document.getElementById('binEditorInput');
+    const preview = document.getElementById('binEditorPreview');
+    const hint = document.getElementById('binEditorHint');
+    if (!input || !preview || !hint) return;
+
+    const raw = input.value.trim();
+    if (!raw) {
+        preview.innerHTML = '';
+        hint.textContent = '';
+        return;
+    }
+
+    const parts = raw.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+    const nums = [];
+    for (const p of parts) {
+        const n = Number(p);
+        if (isNaN(n) || n < 0) {
+            hint.textContent = `⚠️ 输入非法："${p}" 不是有效正数`;
+            preview.innerHTML = '';
+            return;
+        }
+        nums.push(n);
+    }
+
+    if (nums.length < 2) {
+        hint.textContent = `⚠️ 至少需要2个边界值，当前只有 ${nums.length} 个`;
+        preview.innerHTML = '';
+        return;
+    }
+
+    const sorted = [...nums].sort((a, b) => a - b);
+    const dup = sorted.filter((v, i) => i > 0 && v === sorted[i - 1]);
+    if (dup.length > 0) {
+        hint.textContent = `⚠️ 存在重复边界值：${dup.join(', ')}`;
+        preview.innerHTML = '';
+        return;
+    }
+
+    if (!raw.split(/[,，\s]+/).every(s => s.trim() === '' || !isNaN(Number(s.trim())))) {
+        // Already checked above
+    }
+
+    hint.textContent = '';
+    let html = '';
+    for (let i = 0; i < sorted.length - 1; i++) {
+        const a = sorted[i];
+        const b = sorted[i + 1];
+        const aStr = a === Math.floor(a) ? a : a.toFixed(1);
+        const bStr = b === Math.floor(b) ? b : b.toFixed(1);
+        html += `<span class="bin-preview-seg">${aStr} ~ ${bStr} 万</span>`;
+    }
+    preview.innerHTML = html;
+}
+
+function applyCustomBins() {
+    const input = document.getElementById('binEditorInput');
+    if (!input) return;
+    const parts = input.value.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+    const nums = parts.map(Number);
+    if (nums.some(isNaN)) {
+        showToast('请输入有效数字', 'warning');
+        return;
+    }
+    if (nums.length < 2) {
+        showToast('至少需要2个边界值', 'warning');
+        return;
+    }
+    const sorted = [...nums].sort((a, b) => a - b);
+    const dup = sorted.filter((v, i) => i > 0 && v === sorted[i - 1]);
+    if (dup.length > 0) {
+        showToast('存在重复边界值，请修正', 'warning');
+        return;
+    }
+    priceDistState.customBins = sorted;
+    closeBinEditor();
+    loadPriceDistChart();
+    showToast(`已应用 ${sorted.length - 1} 个价格区间`, 'success');
+}
+
+function resetPriceBins() {
+    priceDistState.customBins = null;
+    loadPriceDistChart();
+    showToast('已恢复系统推荐分段', 'info');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const toggleBtn = document.getElementById('pdToggleBtn');
+    if (toggleBtn) toggleBtn.onclick = togglePriceDistCard;
+
+    const editBtn = document.getElementById('pdEditBinBtn');
+    if (editBtn) editBtn.onclick = openBinEditor;
+
+    const resetBtn = document.getElementById('pdResetBinBtn');
+    if (resetBtn) resetBtn.onclick = resetPriceBins;
+
+    const binEditorClose = document.getElementById('binEditorClose');
+    if (binEditorClose) binEditorClose.onclick = closeBinEditor;
+
+    const binEditorCancel = document.getElementById('binEditorCancel');
+    if (binEditorCancel) binEditorCancel.onclick = closeBinEditor;
+
+    const binEditorApply = document.getElementById('binEditorApply');
+    if (binEditorApply) binEditorApply.onclick = applyCustomBins;
+
+    const binModal = document.getElementById('binEditorModal');
+    if (binModal) {
+        binModal.addEventListener('click', (e) => {
+            if (e.target === binModal) closeBinEditor();
+        });
+    }
+
+    renderQuickTags();
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const binModal = document.getElementById('binEditorModal');
+        if (binModal && binModal.style.display === 'flex') closeBinEditor();
+    }
 });

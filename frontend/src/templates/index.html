@@ -116,22 +116,71 @@
 </div>
 
 <div class="dashboard-grid">
-    <!-- Bar Chart -->
-    <div class="chart-card col-8">
-        <h3>车型参数多维对比</h3>
-        <div id="barChart" class="chart-box" style="height: 380px;"></div>
-        <div class="dashboard-table-container" style="max-height: 240px;">
-            <table class="dashboard-table">
-                <thead>
-                    <tr>
-                        <th>车型</th>
-                        <th>续航</th>
-                        <th>价格</th>
-                        <th>电耗</th>
-                    </tr>
-                </thead>
-                <tbody id="dashboardTableBody"></tbody>
-            </table>
+    <!-- Left Column: Bar Chart + Price Distribution -->
+    <div class="col-8" style="display: flex; flex-direction: column; gap: 30px;">
+        <!-- Bar Chart -->
+        <div class="chart-card" style="flex: 1;">
+            <h3>车型参数多维对比</h3>
+            <div id="barChart" class="chart-box" style="height: 380px;"></div>
+            <div class="dashboard-table-container" style="max-height: 240px;">
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>车型</th>
+                            <th>续航</th>
+                            <th>价格</th>
+                            <th>电耗</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dashboardTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Price Distribution Card -->
+        <div class="chart-card price-dist-card" id="priceDistCard">
+            <div class="price-dist-header">
+                <div class="price-dist-title-wrap">
+                    <h3 style="margin-bottom: 6px;">价格带分布</h3>
+                    <div class="price-dist-summary" id="priceDistSummary">
+                        <span class="pd-summary-item">
+                            <span class="pd-summary-label">样本数</span>
+                            <span class="pd-summary-value" id="pdSampleCount">0</span>
+                        </span>
+                        <span class="pd-summary-divider">|</span>
+                        <span class="pd-summary-item">
+                            <span class="pd-summary-label">价格跨度</span>
+                            <span class="pd-summary-value" id="pdPriceSpan">0 万</span>
+                        </span>
+                        <span class="pd-summary-divider">|</span>
+                        <span class="pd-summary-item">
+                            <span class="pd-summary-label">集中区间</span>
+                            <span class="pd-summary-value pd-highlight" id="pdMostInterval">-</span>
+                        </span>
+                    </div>
+                </div>
+                <div class="price-dist-actions">
+                    <button class="pd-action-btn" onclick="openBinEditor()" title="编辑价格区间">
+                        <span>⚙</span>
+                        <span class="pd-action-text">编辑分段</span>
+                    </button>
+                    <button class="pd-action-btn" onclick="resetPriceBins()" title="恢复系统推荐分段">
+                        <span>↺</span>
+                        <span class="pd-action-text">推荐分段</span>
+                    </button>
+                    <button class="pd-toggle-btn" onclick="togglePriceDistCard()" id="pdToggleBtn" title="折叠/展开">
+                        <span id="pdToggleIcon">▼</span>
+                    </button>
+                </div>
+            </div>
+            <div class="price-dist-body" id="priceDistBody">
+                <div id="priceDistChart" class="price-dist-chart"></div>
+                <div class="price-dist-quick-tags" id="pdQuickTags" style="display: none;">
+                    <div class="pd-quick-label">快捷价格带：</div>
+                    <div class="pd-quick-tags-list" id="pdQuickTagsList"></div>
+                    <button class="pd-clear-tags" onclick="clearPriceRangeFilter()">清空筛选</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -140,6 +189,27 @@
         <h3>区域品牌份额分布</h3>
         <div id="pieChart" class="chart-box"></div>
     </div>
+
+    <!-- Bins Editor Modal -->
+    <div id="binEditorModal" class="bin-editor-modal" style="display: none;">
+        <div class="bin-editor-panel">
+            <div class="bin-editor-header">
+                <h4>自定义价格区间（万元）</h4>
+                <button class="bin-editor-close" onclick="closeBinEditor()">&times;</button>
+            </div>
+            <div class="bin-editor-body">
+                <p class="bin-editor-tip">按升序输入分隔点，用英文逗号分隔。例如：0,15,25,35,50,80,120,200</p>
+                <input type="text" id="binEditorInput" placeholder="请输入分隔点，例如：0,15,25,35,50,80,120,200">
+                <div class="bin-editor-preview" id="binEditorPreview"></div>
+                <p class="bin-editor-hint" id="binEditorHint"></p>
+            </div>
+            <div class="bin-editor-footer">
+                <button class="btn btn-outline" onclick="closeBinEditor()" style="background: #334155;">取消</button>
+                <button class="btn" onclick="applyCustomBins()">应用分段</button>
+            </div>
+        </div>
+    </div>
+
 
     <!-- Line Chart -->
     <div class="chart-card col-12">

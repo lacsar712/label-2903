@@ -2230,3 +2230,198 @@ def view_shared_compare(token):
         'share_token': token,
         'view_count': share.view_count
     })
+
+
+# ========== 价格带分布模块 ==========
+
+def _get_default_price_bins(min_price, max_price):
+    if min_price is None or max_price is None or min_price >= max_price:
+        return [0, 15, 25, 35, 50, 80, 120, 200]
+    span = max_price - min_price
+    if span <= 30:
+        step = 5
+    elif span <= 80:
+        step = 10
+    elif span <= 200:
+        step = 20
+    else:
+        step = 50
+    bins = []
+    start = int(min_price // step) * step
+    if start > 0:
+        bins.append(0)
+    current = start
+    while current <= max_price + step:
+        bins.append(round(current, 2))
+        current += step
+    if bins[0] > 0:
+        bins.insert(0, 0)
+    if len(bins) < 3:
+        bins = [0, 15, 25, 35, 50, 80, 120, 200]
+    return bins
+
+
+def _get_available_periods_sorted():
+    periods = db.session.query(SalesData.period).distinct().order_by(SalesData.period).all()
+    return [p[0] for p in periods]
+
+
+def _calc_price_distribution(cars_query, bins, period_filter=None):
+    cars = cars_query.all()
+    if not cars:
+        return []
+
+    car_ids = [c.id for c in cars]
+
+    brand_sales = {}
+    if period_filter:
+        sales_rows = db.session.query(
+            SalesData.car_model_id,
+            CarModel.brand,
+            func.sum(SalesData.quantity).label('qty')
+        ).join(CarModel).filter(
+            SalesData.car_model_id.in_(car_ids),
+            SalesData.period == period_filter
+        ).group_by(SalesData.car_model_id, CarModel.brand).all()
+    else:
+        sales_rows = db.session.query(
+            SalesData.car_model_id,
+            CarModel.brand,
+            func.sum(SalesData.quantity).label('qty')
+        ).join(CarModel).filter(
+            SalesData.car_model_id.in_(car_ids)
+        ).group_by(SalesData.car_model_id, CarModel.brand).all()
+
+    for r in sales_rows:
+        cid = r.car_model_id
+        if cid not in brand_sales:
+            brand_sales[cid] = {}
+        brand_sales[cid][r.brand] = int(r.qty or 0)
+
+    intervals = []
+    for i in range(len(bins) - 1):
+        low = bins[i]
+        high = bins[i + 1]
+        is_last = (i == len(bins) - 2)
+
+        if is_last:
+            interval_cars = [c for c in cars if c.price >= low and c.price <= high]
+        else:
+            interval_cars = [c for c in cars if c.price >= low and c.price < high]
+
+        bev_count = sum(1 for c in interval_cars if c.category == '纯电')
+        phev_count = sum(1 for c in interval_cars if c.category == '混动')
+        total_count = len(interval_cars)
+
+        avg_range = 0
+        avg_power = 0
+        if total_count > 0:
+            ranges = [c.range_km for c in interval_cars if c.range_km]
+            powers = [c.power_consumption for c in interval_cars if c.power_consumption]
+            avg_range = round(sum(ranges) / len(ranges), 1) if ranges else 0
+            avg_power = round(sum(powers) / len(powers), 2) if powers else 0
+
+        prices_sorted = sorted([c.price for c in interval_cars])
+        median_price = 0
+        if prices_sorted:
+            n = len(prices_sorted)
+            if n % 2 == 1:
+                median_price = prices_sorted[n // 2]
+            else:
+                median_price = round((prices_sorted[n // 2 - 1] + prices_sorted[n // 2]) / 2, 2)
+
+        brand_total = {}
+        for c in interval_cars:
+            cid = c.id
+            if cid in brand_sales:
+                for brand, qty in brand_sales[cid].items():
+                    brand_total[brand] = brand_total.get(brand, 0) + qty
+        top_brands = sorted(brand_total.items(), key=lambda x: x[1], reverse=True)[:3]
+        top_brands_list = [{'brand': b, 'sales': q} for b, q in top_brands]
+
+        label = f'{low}-{high}万'
+        intervals.append({
+            'index': i,
+            'label': label,
+            'low': low,
+            'high': high,
+            'bev_count': bev_count,
+            'phev_count': phev_count,
+            'total_count': total_count,
+            'avg_range': avg_range,
+            'avg_power': avg_power,
+            'median_price': median_price,
+            'top_brands': top_brands_list
+        })
+
+    return intervals
+
+
+@bp.route("/api/chart/price_distribution")
+@login_required
+def get_price_distribution():
+    query = CarModel.query
+    query = apply_car_filters(query)
+
+    all_prices = [c.price for c in CarModel.query.all()]
+    sys_min = min(all_prices) if all_prices else 0
+    sys_max = max(all_prices) if all_prices else 100
+    recommended_bins = _get_default_price_bins(sys_min, sys_max)
+
+    custom_bins_str = request.args.get('bins')
+    if custom_bins_str:
+        try:
+            custom_bins = [float(x.strip()) for x in custom_bins_str.split(',') if x.strip()]
+            custom_bins = sorted(list(set(custom_bins)))
+            if len(custom_bins) >= 2:
+                bins = custom_bins
+            else:
+                bins = recommended_bins
+        except (ValueError, TypeError):
+            bins = recommended_bins
+    else:
+        bins = recommended_bins
+
+    filtered_prices = [c.price for c in query.all()]
+    sample_min = min(filtered_prices) if filtered_prices else 0
+    sample_max = max(filtered_prices) if filtered_prices else 0
+    sample_count = len(filtered_prices)
+    price_span = round(sample_max - sample_min, 2) if filtered_prices else 0
+
+    periods = _get_available_periods_sorted()
+    current_period = periods[-1] if periods else None
+    prev_period = periods[-2] if len(periods) >= 2 else None
+
+    current_intervals = _calc_price_distribution(query, bins, current_period)
+    prev_intervals = _calc_price_distribution(query, bins, prev_period) if prev_period else []
+
+    prev_counts = {}
+    for pi in prev_intervals:
+        prev_counts[pi['index']] = pi['total_count']
+
+    for ci in current_intervals:
+        ci['prev_count'] = prev_counts.get(ci['index'], 0)
+
+    most_interval = None
+    max_count = 0
+    for iv in current_intervals:
+        if iv['total_count'] > max_count:
+            max_count = iv['total_count']
+            most_interval = iv['label']
+
+    return jsonify({
+        'bins': bins,
+        'recommended_bins': recommended_bins,
+        'intervals': current_intervals,
+        'periods': periods,
+        'current_period': current_period,
+        'previous_period': prev_period,
+        'summary': {
+            'sample_count': sample_count,
+            'price_min': sample_min,
+            'price_max': sample_max,
+            'price_span': price_span,
+            'most_interval': most_interval or '-',
+            'most_count': max_count
+        }
+    })
