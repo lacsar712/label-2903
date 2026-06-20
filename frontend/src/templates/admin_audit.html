@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% block title %}操作审计日志{% endblock %}
+{% block content %}
+
+<div class="filter-pane">
+    <h3><i class="icon"></i> 操作审计日志</h3>
+    <div style="margin-left: auto; display: flex; gap: 15px; align-items: center;">
+        <div class="filter-group">
+            <label>操作人</label>
+            <input type="text" id="filterUsername" placeholder="输入用户名搜索" style="width: 180px;">
+        </div>
+        <div class="filter-group">
+            <label>开始日期</label>
+            <input type="date" id="filterStartDate" style="width: 160px;">
+        </div>
+        <div class="filter-group">
+            <label>结束日期</label>
+            <input type="date" id="filterEndDate" style="width: 160px;">
+        </div>
+        <div class="filter-group">
+            <label>操作类型</label>
+            <select id="filterAction" style="width: 140px;">
+                <option value="">全部</option>
+                <option value="用户登录">用户登录</option>
+                <option value="用户登出">用户登出</option>
+                <option value="新增车型">新增车型</option>
+                <option value="更新车型">更新车型</option>
+                <option value="删除车型">删除车型</option>
+                <option value="新增用户">新增用户</option>
+                <option value="更新用户">更新用户</option>
+                <option value="删除用户">删除用户</option>
+                <option value="修改密码">修改密码</option>
+            </select>
+        </div>
+        <button onclick="searchLogs()" class="btn" style="align-self: flex-end;">查询</button>
+        <button onclick="resetFilters()" class="btn" style="align-self: flex-end; background: #334155;">重置</button>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-bottom: 24px;">
+    <div class="chart-card" style="padding: 28px;">
+        <div style="display: flex; align-items: center; gap: 20px;">
+            <div style="width: 60px; height: 60px; background: linear-gradient(135deg, #38bdf8, #818cf8); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 28px;">
+                📊
+            </div>
+            <div>
+                <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 6px;">今日操作总量</div>
+                <div id="todayCount" style="font-size: 32px; font-weight: 800; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">0</div>
+            </div>
+        </div>
+    </div>
+    <div class="chart-card" style="padding: 28px;">
+        <div style="display: flex; align-items: center; gap: 20px;">
+            <div style="width: 60px; height: 60px; background: linear-gradient(135deg, #10b981, #34d399); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 28px;">
+                👥
+            </div>
+            <div>
+                <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 6px;">近一周活跃管理员</div>
+                <div id="activeAdmins" style="font-size: 32px; font-weight: 800; background: linear-gradient(135deg, #10b981, #34d399); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">0</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="chart-card col-12" style="height: auto; min-height: 500px; padding: 0;">
+    <div class="dashboard-table-container" style="max-height: none; border: none; background: transparent;">
+        <table class="dashboard-table">
+            <thead>
+                <tr>
+                    <th style="padding-left: 24px;">操作人</th>
+                    <th style="width: 120px;">操作类型</th>
+                    <th>操作描述</th>
+                    <th style="width: 180px;">操作时间</th>
+                    <th style="width: 140px; padding-right: 24px;">来源地址</th>
+                </tr>
+            </thead>
+            <tbody id="auditTableBody">
+            </tbody>
+        </table>
+    </div>
+    <div style="padding: 20px 24px; border-top: 1px solid var(--glass-border); display: flex; justify-content: space-between; align-items: center;">
+        <div id="paginationInfo" style="color: var(--text-secondary); font-size: 14px;">
+            共 0 条记录
+        </div>
+        <div id="paginationControls" style="display: flex; gap: 8px;">
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentPage = 1;
+    const perPage = 20;
+
+    async function loadStats() {
+        try {
+            const res = await fetch('/api/admin/audit/stats');
+            const data = await res.json();
+            document.getElementById('todayCount').textContent = data.today_count || 0;
+            document.getElementById('activeAdmins').textContent = data.active_admins_7d || 0;
+        } catch (e) {
+            console.error('Failed to load stats:', e);
+        }
+    }
+
+    async function loadLogs(page = 1) {
+        currentPage = page;
+        const username = document.getElementById('filterUsername').value;
+        const startDate = document.getElementById('filterStartDate').value;
+        const endDate = document.getElementById('filterEndDate').value;
+        const action = document.getElementById('filterAction').value;
+
+        const params = new URLSearchParams({
+            page: page,
+            per_page: perPage
+        });
+        if (username) params.append('username', username);
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate);
+        if (action) params.append('action', action);
+
+        try {
+            const res = await fetch(`/api/admin/audit?${params.toString()}`);
+            const data = await res.json();
+            renderLogs(data.logs);
+            renderPagination(data);
+        } catch (e) {
+            console.error('Failed to load logs:', e);
+        }
+    }
+
+    function renderLogs(logs) {
+        const tbody = document.getElementById('auditTableBody');
+        if (!logs || logs.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" style="text-align: center; padding: 60px; color: var(--text-secondary);">
+                        暂无审计日志记录
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        const actionColors = {
+            '用户登录': '#10b981',
+            '用户登出': '#f59e0b',
+            '新增车型': '#38bdf8',
+            '更新车型': '#818cf8',
+            '删除车型': '#f43f5e',
+            '新增用户': '#38bdf8',
+            '更新用户': '#818cf8',
+            '删除用户': '#f43f5e',
+            '修改密码': '#f59e0b'
+        };
+
+        tbody.innerHTML = logs.map(log => {
+            const color = actionColors[log.action] || '#94a3b8';
+            return `
+                <tr>
+                    <td style="padding-left: 24px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div style="width: 32px; height: 32px; border-radius: 50%; background: rgba(56, 189, 248, 0.2); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: var(--accent-color);">
+                                ${log.username.charAt(0).toUpperCase()}
+                            </div>
+                            <span style="font-weight: 500; color: var(--text-primary);">${log.username}</span>
+                        </div>
+                    </td>
+                    <td>
+                        <span style="padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; background: ${color}20; color: ${color};">
+                            ${log.action}
+                        </span>
+                    </td>
+                    <td style="color: var(--text-secondary);">${log.target}</td>
+                    <td style="color: var(--text-secondary); font-family: 'Courier New', monospace;">${log.created_at}</td>
+                    <td style="padding-right: 24px; color: var(--text-secondary); font-family: 'Courier New', monospace;">
+                        ${log.ip_address || '-'}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function renderPagination(data) {
+        const info = document.getElementById('paginationInfo');
+        const controls = document.getElementById('paginationControls');
+        
+        const start = (data.current_page - 1) * data.per_page + 1;
+        const end = Math.min(data.current_page * data.per_page, data.total);
+        info.textContent = `共 ${data.total} 条记录，显示 ${start}-${end} 条`;
+
+        let html = '';
+        
+        html += `<button onclick="goToPage(${data.current_page - 1})" class="btn" style="padding: 6px 14px; font-size: 13px; ${data.current_page <= 1 ? 'opacity: 0.5; cursor: not-allowed;' : ''}" ${data.current_page <= 1 ? 'disabled' : ''}>上一页</button>`;
+        
+        const maxVisible = 5;
+        let startPage = Math.max(1, data.current_page - Math.floor(maxVisible / 2));
+        let endPage = Math.min(data.pages, startPage + maxVisible - 1);
+        startPage = Math.max(1, endPage - maxVisible + 1);
+
+        for (let i = startPage; i <= endPage; i++) {
+            const isActive = i === data.current_page;
+            html += `<button onclick="goToPage(${i})" class="btn" style="padding: 6px 14px; font-size: 13px; ${isActive ? 'background: linear-gradient(135deg, #38bdf8, #818cf8);' : 'background: #334155;'}">${i}</button>`;
+        }
+        
+        html += `<button onclick="goToPage(${data.current_page + 1})" class="btn" style="padding: 6px 14px; font-size: 13px; ${data.current_page >= data.pages ? 'opacity: 0.5; cursor: not-allowed;' : ''}" ${data.current_page >= data.pages ? 'disabled' : ''}>下一页</button>`;
+        
+        controls.innerHTML = html;
+    }
+
+    function goToPage(page) {
+        if (page < 1) return;
+        loadLogs(page);
+    }
+
+    function searchLogs() {
+        loadLogs(1);
+    }
+
+    function resetFilters() {
+        document.getElementById('filterUsername').value = '';
+        document.getElementById('filterStartDate').value = '';
+        document.getElementById('filterEndDate').value = '';
+        document.getElementById('filterAction').value = '';
+        loadLogs(1);
+    }
+
+    window.addEventListener('load', () => {
+        loadStats();
+        loadLogs(1);
+    });
+</script>
+{% endblock %}

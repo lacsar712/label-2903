@@ -19,6 +19,7 @@
             {% if current_user.role == 'admin' %}
             <a href="{{ url_for('main.admin_data') }}">数据管理</a>
             <a href="{{ url_for('main.admin_users') }}">用户管理</a>
+            <a href="{{ url_for('main.admin_audit') }}">操作审计</a>
             {% endif %}
             <a href="{{ url_for('main.change_password') }}">修改密码</a>
             <a href="{{ url_for('main.logout') }}">安全退出</a>

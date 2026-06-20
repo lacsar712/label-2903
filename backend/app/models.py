@@ -1,5 +1,6 @@
 from app import db, login_manager
 from flask_login import UserMixin
+from datetime import datetime
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -33,3 +34,14 @@ class ChargingPile(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     province = db.Column(db.String(50), nullable=False)
     density = db.Column(db.Float, nullable=False)
+
+class AuditLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    username = db.Column(db.String(20), nullable=False)
+    action = db.Column(db.String(50), nullable=False)
+    target = db.Column(db.String(200), nullable=False)
+    ip_address = db.Column(db.String(50), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('audit_logs', lazy=True))

@@ -1,14 +1,32 @@
 from flask import Blueprint, render_template, url_for, flash, redirect, request, jsonify, make_response
 from app import db, bcrypt
-from app.models import User, CarModel, SalesData, ChargingPile
+from app.models import User, CarModel, SalesData, ChargingPile, AuditLog
 from flask_login import login_user, current_user, logout_user, login_required
 from sqlalchemy import func, or_
 import random
 import pandas as pd
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta
 
 bp = Blueprint('main', __name__)
+
+def log_audit(action, target):
+    try:
+        ip = request.remote_addr
+        user_id = current_user.id if current_user.is_authenticated else None
+        username = current_user.username if current_user.is_authenticated else 'anonymous'
+        log = AuditLog(
+            user_id=user_id,
+            username=username,
+            action=action,
+            target=target,
+            ip_address=ip
+        )
+        db.session.add(log)
+        db.session.commit()
+    except Exception as e:
+        print(f"Audit log error: {e}")
+        db.session.rollback()
 
 @bp.route("/")
 @login_required
@@ -25,6 +43,7 @@ def login():
         user = User.query.filter_by(username=username).first()
         if user and bcrypt.check_password_hash(user.password, password):
             login_user(user)
+            log_audit('用户登录', f'用户 {username} 登录系统')
             return redirect(url_for('main.home'))
         else:
             flash('登录失败，请检查用户名或密码', 'danger')
@@ -47,6 +66,8 @@ def register():
 
 @bp.route("/logout")
 def logout():
+    if current_user.is_authenticated:
+        log_audit('用户登出', f'用户 {current_user.username} 登出系统')
     logout_user()
     return redirect(url_for('main.login'))
 
@@ -249,6 +270,7 @@ def add_car():
             db.session.add(sale)
             
     db.session.commit()
+    log_audit('新增车型', f'新增车型: {car.brand} {car.model_name} (ID: {car.id})')
     return jsonify({'id': car.id})
 
 @bp.route("/api/admin/cars/<int:id>", methods=['PUT', 'DELETE'])
@@ -258,9 +280,11 @@ def update_delete_car(id):
     car = CarModel.query.get_or_404(id)
     if request.method == 'DELETE':
         # Also clean up sales data
+        car_name = f'{car.brand} {car.model_name}'
         SalesData.query.filter_by(car_model_id=id).delete()
         db.session.delete(car)
         db.session.commit()
+        log_audit('删除车型', f'删除车型: {car_name} (ID: {id})')
         return jsonify({'status': 'deleted'})
     
     data = request.json
@@ -272,6 +296,7 @@ def update_delete_car(id):
     car.weight_kg = int(data['weight'])
     car.category = data['category']
     db.session.commit()
+    log_audit('更新车型', f'更新车型: {car.brand} {car.model_name} (ID: {id})')
     return jsonify({'status': 'updated'})
 
 @bp.route("/admin/init_db")
@@ -341,6 +366,7 @@ def manage_users():
     user = User(username=data['username'], password=hashed_pw, role=data.get('role', 'user'))
     db.session.add(user)
     db.session.commit()
+    log_audit('新增用户', f'新增用户: {user.username} (角色: {user.role}, ID: {user.id})')
     return jsonify({'status': 'created'})
 
 @bp.route("/api/admin/users/<int:id>", methods=['PUT', 'DELETE'])
@@ -350,8 +376,10 @@ def edit_user(id):
     user = User.query.get_or_404(id)
     if request.method == 'DELETE':
         if user.id == current_user.id: return jsonify({'error': '不能删除自己'}), 400
+        username = user.username
         db.session.delete(user)
         db.session.commit()
+        log_audit('删除用户', f'删除用户: {username} (ID: {id})')
         return jsonify({'status': 'deleted'})
     
     data = request.json
@@ -359,7 +387,11 @@ def edit_user(id):
     user.role = data['role']
     if data.get('password'):
         user.password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
+        log_msg = f'更新用户信息及密码: {user.username} (角色: {user.role}, ID: {id})'
+    else:
+        log_msg = f'更新用户信息: {user.username} (角色: {user.role}, ID: {id})'
     db.session.commit()
+    log_audit('更新用户', log_msg)
     return jsonify({'status': 'updated'})
 
 @bp.route("/change_password", methods=['GET', 'POST'])
@@ -371,6 +403,7 @@ def change_password():
         if bcrypt.check_password_hash(current_user.password, old_pw):
             current_user.password = bcrypt.generate_password_hash(new_pw).decode('utf-8')
             db.session.commit()
+            log_audit('修改密码', f'用户 {current_user.username} 修改了登录密码')
             flash('密码修改成功！', 'success')
             return redirect(url_for('main.home'))
         else:
@@ -587,3 +620,91 @@ def export_sales():
     
     df = pd.DataFrame(data)
     return _export_excel(df, '销量汇总')
+
+# --- Audit Log ---
+
+@bp.route("/admin/audit")
+@login_required
+def admin_audit():
+    if current_user.role != 'admin':
+        return redirect(url_for('main.home'))
+    return render_template('admin_audit.html')
+
+@bp.route("/api/admin/audit/stats")
+@login_required
+def audit_stats():
+    if current_user.role != 'admin':
+        return jsonify({}), 403
+    
+    today_start = datetime.utcnow().date()
+    today_start_dt = datetime.combine(today_start, datetime.min.time())
+    
+    today_count = AuditLog.query.filter(AuditLog.created_at >= today_start_dt).count()
+    
+    week_ago = datetime.utcnow() - timedelta(days=7)
+    active_admins = db.session.query(func.count(func.distinct(AuditLog.user_id))).filter(
+        AuditLog.created_at >= week_ago,
+        AuditLog.user_id.isnot(None)
+    ).scalar()
+    
+    return jsonify({
+        'today_count': today_count,
+        'active_admins_7d': active_admins or 0
+    })
+
+@bp.route("/api/admin/audit")
+@login_required
+def audit_logs():
+    if current_user.role != 'admin':
+        return jsonify([]), 403
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    username = request.args.get('username', '')
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+    action = request.args.get('action', '')
+    
+    query = AuditLog.query
+    
+    if username:
+        query = query.filter(AuditLog.username.contains(username))
+    
+    if action:
+        query = query.filter(AuditLog.action == action)
+    
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+            query = query.filter(AuditLog.created_at >= start_dt)
+        except ValueError:
+            pass
+    
+    if end_date:
+        try:
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+            end_dt = end_dt + timedelta(days=1)
+            query = query.filter(AuditLog.created_at < end_dt)
+        except ValueError:
+            pass
+    
+    query = query.order_by(AuditLog.created_at.desc())
+    
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    
+    logs = [{
+        'id': log.id,
+        'username': log.username,
+        'action': log.action,
+        'target': log.target,
+        'ip_address': log.ip_address,
+        'created_at': log.created_at.strftime('%Y-%m-%d %H:%M:%S')
+    } for log in pagination.items]
+    
+    return jsonify({
+        'logs': logs,
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page,
+        'per_page': per_page
+    })
