@@ -15,6 +15,7 @@
         <div class="nav-links">
             {% if current_user.is_authenticated %}
             <a href="{{ url_for('main.home') }}">数据大屏</a>
+            <a href="{{ url_for('main.compare') }}">竞品对标</a>
             {% if current_user.role == 'admin' %}
             <a href="{{ url_for('main.admin_data') }}">数据管理</a>
             <a href="{{ url_for('main.admin_users') }}">用户管理</a>

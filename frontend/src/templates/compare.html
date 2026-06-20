@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% block title %}竞品对标{% endblock %}
+{% block content %}
+<div class="compare-header">
+    <h2>竞品对标分析</h2>
+    <p>选择最多三款车型，进行五维核心指标横向较量</p>
+</div>
+
+<div class="compare-search-bar">
+    <div class="search-input-wrap">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" id="compareSearchInput" placeholder="搜索车型名称或品牌..." autocomplete="off">
+        <div id="compareSearchDropdown" class="search-dropdown"></div>
+    </div>
+</div>
+
+<div class="compare-slots">
+    <div class="compare-slot" id="slot-0" data-index="0">
+        <div class="slot-placeholder">
+            <div class="slot-plus">+</div>
+            <div class="slot-label">添加车型 1</div>
+        </div>
+        <div class="slot-filled" style="display:none;">
+            <div class="slot-car-name" id="slotName-0"></div>
+            <div class="slot-car-brand" id="slotBrand-0"></div>
+            <button class="slot-remove" onclick="removeCar(0)">&#10005;</button>
+        </div>
+    </div>
+    <div class="compare-vs">VS</div>
+    <div class="compare-slot" id="slot-1" data-index="1">
+        <div class="slot-placeholder">
+            <div class="slot-plus">+</div>
+            <div class="slot-label">添加车型 2</div>
+        </div>
+        <div class="slot-filled" style="display:none;">
+            <div class="slot-car-name" id="slotName-1"></div>
+            <div class="slot-car-brand" id="slotBrand-1"></div>
+            <button class="slot-remove" onclick="removeCar(1)">&#10005;</button>
+        </div>
+    </div>
+    <div class="compare-vs">VS</div>
+    <div class="compare-slot" id="slot-2" data-index="2">
+        <div class="slot-placeholder">
+            <div class="slot-plus">+</div>
+            <div class="slot-label">添加车型 3</div>
+        </div>
+        <div class="slot-filled" style="display:none;">
+            <div class="slot-car-name" id="slotName-2"></div>
+            <div class="slot-car-brand" id="slotBrand-2"></div>
+            <button class="slot-remove" onclick="removeCar(2)">&#10005;</button>
+        </div>
+    </div>
+</div>
+
+<div class="compare-main">
+    <div class="compare-radar-card chart-card">
+        <h3>五维雷达图</h3>
+        <div id="radarChart" class="chart-box" style="height:420px;"></div>
+    </div>
+</div>
+
+<div class="compare-table-card chart-card">
+    <h3>参数明细对照</h3>
+    <div class="compare-table-wrap">
+        <table class="compare-table" id="compareTable">
+            <thead>
+                <tr id="compareTableHead">
+                    <th>指标</th>
+                </tr>
+            </thead>
+            <tbody id="compareTableBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+(function() {
+    var selectedCars = [null, null, null];
+    var radarChart = null;
+    var searchTimer = null;
+
+    var SLOT_COLORS = ['#38bdf8', '#a78bfa', '#f472b6'];
+    var SLOT_FILLS = ['rgba(56,189,248,0.25)', 'rgba(167,139,250,0.25)', 'rgba(244,114,182,0.25)'];
+
+    function init() {
+        var el = document.getElementById('radarChart');
+        if (el) radarChart = echarts.init(el);
+
+        var input = document.getElementById('compareSearchInput');
+        input.addEventListener('input', function() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(function() { doSearch(input.value.trim()); }, 300);
+        });
+        input.addEventListener('focus', function() {
+            if (input.value.trim()) doSearch(input.value.trim());
+        });
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.search-input-wrap')) {
+                document.getElementById('compareSearchDropdown').style.display = 'none';
+            }
+        });
+
+        document.querySelectorAll('.compare-slot').forEach(function(slot) {
+            slot.addEventListener('click', function(e) {
+                if (e.target.closest('.slot-remove')) return;
+                var idx = parseInt(slot.dataset.index);
+                if (!selectedCars[idx]) {
+                    input.focus();
+                }
+            });
+        });
+
+        updateSlots();
+        updateRadar();
+        updateTable();
+    }
+
+    async function doSearch(q) {
+        var dropdown = document.getElementById('compareSearchDropdown');
+        if (!q) { dropdown.style.display = 'none'; return; }
+        var res = await fetch('/api/compare/search?q=' + encodeURIComponent(q));
+        var cars = await res.json();
+        var selectedIds = selectedCars.filter(Boolean).map(function(c) { return c.id; });
+        var filtered = cars.filter(function(c) { return selectedIds.indexOf(c.id) === -1; });
+
+        if (filtered.length === 0) {
+            dropdown.innerHTML = '<div class="search-item search-empty">无匹配车型</div>';
+            dropdown.style.display = 'block';
+            return;
+        }
+        dropdown.innerHTML = filtered.map(function(c) {
+            return '<div class="search-item" data-id="' + c.id + '">' +
+                '<span class="search-item-name">' + c.brand + ' ' + c.model_name + '</span>' +
+                '<span class="search-item-meta">' + c.price + '万 | ' + c.range_km + 'km</span>' +
+                '</div>';
+        }).join('');
+        dropdown.style.display = 'block';
+
+        dropdown.querySelectorAll('.search-item').forEach(function(item) {
+            item.addEventListener('click', function() {
+                var id = parseInt(item.dataset.id);
+                var car = filtered.find(function(c) { return c.id === id; });
+                if (car) addCar(car);
+                dropdown.style.display = 'none';
+                document.getElementById('compareSearchInput').value = '';
+            });
+        });
+    }
+
+    function addCar(car) {
+        var idx = selectedCars.indexOf(null);
+        if (idx === -1) { showToast('最多选择三款车型', 'danger'); return; }
+        selectedCars[idx] = car;
+        updateSlots();
+        refreshData();
+    }
+
+    window.removeCar = function(idx) {
+        selectedCars[idx] = null;
+        updateSlots();
+        refreshData();
+    };
+
+    function updateSlots() {
+        for (var i = 0; i < 3; i++) {
+            var slot = document.getElementById('slot-' + i);
+            var placeholder = slot.querySelector('.slot-placeholder');
+            var filled = slot.querySelector('.slot-filled');
+            if (selectedCars[i]) {
+                placeholder.style.display = 'none';
+                filled.style.display = 'block';
+                filled.style.borderColor = SLOT_COLORS[i];
+                document.getElementById('slotName-' + i).textContent = selectedCars[i].model_name;
+                document.getElementById('slotBrand-' + i).textContent = selectedCars[i].brand;
+            } else {
+                placeholder.style.display = 'block';
+                filled.style.display = 'none';
+                filled.style.borderColor = '';
+            }
+        }
+    }
+
+    async function refreshData() {
+        var ids = selectedCars.filter(Boolean).map(function(c) { return c.id; });
+        if (ids.length === 0) {
+            updateRadar([]);
+            updateTable([]);
+            return;
+        }
+        var res = await fetch('/api/compare/data?ids=' + ids.join(','));
+        var data = await res.json();
+        updateRadar(data.cars, data.radar);
+        updateTable(data.cars);
+    }
+
+    function updateRadar(cars, radar) {
+        if (!radarChart) return;
+        if (!cars || cars.length === 0) {
+            radarChart.setOption({
+                title: { text: '请添加车型以查看对比', left: 'center', top: 'middle', textStyle: { color: '#64748b', fontSize: 16 } },
+                tooltip: { show: false }, legend: { show: false }, series: []
+            }, true);
+            return;
+        }
+        var series = cars.map(function(c, i) {
+            return {
+                value: [c.norm_price, c.norm_range, c.norm_power, c.norm_weight, c.norm_sales],
+                name: c.brand + ' ' + c.model_name,
+                areaStyle: { color: SLOT_FILLS[i] },
+                lineStyle: { color: SLOT_COLORS[i], width: 2 },
+                itemStyle: { color: SLOT_COLORS[i] }
+            };
+        });
+        radarChart.setOption({
+            title: { show: false },
+            tooltip: {
+                trigger: 'item',
+                backgroundColor: '#1e293b',
+                borderColor: '#334155',
+                textStyle: { color: '#fff' }
+            },
+            legend: {
+                data: cars.map(function(c) { return c.brand + ' ' + c.model_name; }),
+                bottom: 10,
+                textStyle: { color: '#94a3b8' }
+            },
+            radar: {
+                indicator: radar.indicators,
+                shape: 'circle',
+                splitNumber: 4,
+                axisName: { color: '#94a3b8', fontSize: 12 },
+                splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
+                splitArea: { areaStyle: { color: ['rgba(255,255,255,0.02)', 'rgba(255,255,255,0.04)'] } },
+                axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } }
+            },
+            series: [{
+                type: 'radar',
+                data: series,
+                symbol: 'circle',
+                symbolSize: 6
+            }]
+        }, true);
+    }
+
+    function updateTable(cars) {
+        var thead = document.getElementById('compareTableHead');
+        var tbody = document.getElementById('compareTableBody');
+
+        var headHtml = '<th>指标</th>';
+        for (var i = 0; i < 3; i++) {
+            if (selectedCars[i]) {
+                headHtml += '<th style="color:' + SLOT_COLORS[i] + '">' + selectedCars[i].brand + ' ' + selectedCars[i].model_name + '</th>';
+            } else {
+                headHtml += '<th class="th-empty">虚位</th>';
+            }
+        }
+        thead.innerHTML = headHtml;
+
+        if (!cars || cars.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#64748b;padding:40px;">请添加车型以查看参数对比</td></tr>';
+            return;
+        }
+
+        var dimensions = [
+            { key: 'price', label: '价格 (万元)', lower: true, suffix: ' 万' },
+            { key: 'range_km', label: '续航 (km)', lower: false, suffix: ' km' },
+            { key: 'power_consumption', label: '电耗 (kWh/100km)', lower: true, suffix: '' },
+            { key: 'weight_kg', label: '车重 (kg)', lower: true, suffix: ' kg' },
+            { key: 'total_sales', label: '累计销量', lower: false, suffix: ' 辆' }
+        ];
+
+        var rows = '';
+        dimensions.forEach(function(dim) {
+            var vals = [];
+            for (var i = 0; i < 3; i++) {
+                if (selectedCars[i]) {
+                    var car = cars.find(function(c) { return c.id === selectedCars[i].id; });
+                    vals.push(car ? car[dim.key] : null);
+                } else {
+                    vals.push(null);
+                }
+            }
+
+            var winnerIdx = -1;
+            var validVals = vals.filter(function(v) { return v !== null; });
+            if (validVals.length > 1) {
+                var best = dim.lower ? Math.min.apply(null, validVals) : Math.max.apply(null, validVals);
+                winnerIdx = vals.indexOf(best);
+            }
+
+            rows += '<tr>';
+            rows += '<td>' + dim.label + '</td>';
+            for (var j = 0; j < 3; j++) {
+                if (vals[j] !== null) {
+                    var isWin = (j === winnerIdx);
+                    rows += '<td' + (isWin ? ' class="cell-winner"' : '') + '>';
+                    rows += (typeof vals[j] === 'number' ? vals[j].toLocaleString() : vals[j]) + dim.suffix;
+                    if (isWin) rows += ' <span class="winner-badge">&#9733;</span>';
+                    rows += '</td>';
+                } else {
+                    rows += '<td class="cell-empty">—</td>';
+                }
+            }
+            rows += '</tr>';
+        });
+        tbody.innerHTML = rows;
+    }
+
+    window.addEventListener('load', init);
+    window.addEventListener('resize', function() {
+        if (radarChart) radarChart.resize();
+    });
+})();
+</script>
+{% endblock %}

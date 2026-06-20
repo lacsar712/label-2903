@@ -374,6 +374,92 @@ def change_password():
             flash('旧密码错误', 'danger')
     return render_template('change_password.html')
 
+@bp.route("/compare")
+@login_required
+def compare():
+    return render_template('compare.html')
+
+@bp.route("/api/compare/search")
+@login_required
+def compare_search():
+    q = request.args.get('q', '')
+    query = CarModel.query
+    if q:
+        query = query.filter(or_(
+            CarModel.model_name.contains(q),
+            CarModel.brand.contains(q)
+        ))
+    cars = query.order_by(CarModel.brand, CarModel.model_name).all()
+    return jsonify([{
+        'id': c.id, 'brand': c.brand, 'model_name': c.model_name,
+        'price': c.price, 'range_km': c.range_km,
+        'power': c.power_consumption, 'weight': c.weight_kg,
+        'category': c.category
+    } for c in cars])
+
+@bp.route("/api/compare/data")
+@login_required
+def compare_data():
+    ids = request.args.get('ids', '')
+    if not ids:
+        return jsonify({'cars': [], 'radar': {}})
+    id_list = [int(x) for x in ids.split(',') if x.strip().isdigit()]
+    cars = CarModel.query.filter(CarModel.id.in_(id_list)).all()
+    car_map = {c.id: c for c in cars}
+    ordered = [car_map[i] for i in id_list if i in car_map]
+
+    all_cars = CarModel.query.all()
+    if not all_cars:
+        return jsonify({'cars': [], 'radar': {}})
+
+    prices = [c.price for c in all_cars]
+    ranges = [c.range_km for c in all_cars]
+    powers = [c.power_consumption for c in all_cars]
+    weights = [c.weight_kg for c in all_cars]
+
+    all_sales = db.session.query(
+        SalesData.car_model_id, func.sum(SalesData.quantity).label('total')
+    ).group_by(SalesData.car_model_id).all()
+    sales_map = {s[0]: int(s[1]) for s in all_sales}
+    sales_vals = list(sales_map.values()) if sales_map else [0]
+
+    def norm(val, mn, mx, invert=False):
+        if mx == mn:
+            return 50
+        score = (val - mn) / (mx - mn) * 100
+        return round(100 - score, 1) if invert else round(score, 1)
+
+    price_mn, price_mx = min(prices), max(prices)
+    range_mn, range_mx = min(ranges), max(ranges)
+    power_mn, power_mx = min(powers), max(powers)
+    weight_mn, weight_mx = min(weights), max(weights)
+    sales_mn, sales_mx = min(sales_vals), max(sales_vals)
+
+    result_cars = []
+    for c in ordered:
+        total_sales = sales_map.get(c.id, 0)
+        result_cars.append({
+            'id': c.id, 'brand': c.brand, 'model_name': c.model_name,
+            'price': c.price, 'range_km': c.range_km,
+            'power_consumption': c.power_consumption, 'weight_kg': c.weight_kg,
+            'category': c.category, 'total_sales': total_sales,
+            'norm_price': norm(c.price, price_mn, price_mx, invert=True),
+            'norm_range': norm(c.range_km, range_mn, range_mx),
+            'norm_power': norm(c.power_consumption, power_mn, power_mx, invert=True),
+            'norm_weight': norm(c.weight_kg, weight_mn, weight_mx, invert=True),
+            'norm_sales': norm(total_sales, sales_mn, sales_mx)
+        })
+
+    return jsonify({'cars': result_cars, 'radar': {
+        'indicators': [
+            {'name': '价格优势', 'max': 100},
+            {'name': '续航能力', 'max': 100},
+            {'name': '电耗表现', 'max': 100},
+            {'name': '轻量化', 'max': 100},
+            {'name': '销量表现', 'max': 100}
+        ]
+    }})
+
 @bp.route("/admin/users")
 @login_required
 def admin_users():
