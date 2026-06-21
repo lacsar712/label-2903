@@ -191,3 +191,23 @@ class BrandWeightConfig(db.Model):
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = db.relationship('User', backref=db.backref('brand_weight_config', uselist=False, lazy=True, cascade='all, delete-orphan'))
+
+
+class BrandHealthVisit(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    time_window = db.Column(db.String(10), nullable=False, default='1q')
+    category = db.Column(db.String(20), nullable=False, default='all')
+    snapshot_json = db.Column(db.Text, nullable=False, default='{}')
+    visited_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('brand_health_visits', lazy=True, cascade='all, delete-orphan'))
+
+    def get_snapshot(self):
+        try:
+            return json.loads(self.snapshot_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    def set_snapshot(self, snapshot_dict):
+        self.snapshot_json = json.dumps(snapshot_dict, ensure_ascii=False)

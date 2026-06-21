@@ -162,7 +162,7 @@
 </div>
 
 <script>
-var currentTimeWindow = '1y';
+var currentTimeWindow = '1q';
 var currentCategory = 'all';
 var currentData = null;
 var compareMode = false;
@@ -535,7 +535,7 @@ function openDetail(brand) {
     var isUp = brand.score_change > 0;
     var arrow = isUp ? '▲' : (brand.score_change === 0 ? '—' : '▼');
     var chgCls = isUp ? 'change-up' : (brand.score_change === 0 ? 'change-same' : 'change-down');
-    var chgText = (isUp ? '+' : '') + brand.score_change + ' 分 vs 上期';
+    var chgText = (isUp ? '+' : '') + brand.score_change + ' 分 vs 上次访问';
     document.getElementById('detailScoreChange').className = 'detail-score-change ' + chgCls;
     document.getElementById('detailScoreChange').textContent = arrow + ' ' + chgText;
 

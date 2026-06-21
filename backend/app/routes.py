@@ -3,6 +3,7 @@ from app import db, bcrypt
 from app.models import (
     User, CarModel, SalesData, ChargingPile, AuditLog, Announcement, AnnouncementRead,
     UserPreference, CompareReport, CompareShareLink, BrandTracking, BrandWeightConfig,
+    BrandHealthVisit, BrandHealthScore,
 )
 from flask_login import login_user, current_user, logout_user, login_required
 from sqlalchemy import func, or_
@@ -2865,26 +2866,42 @@ def api_brand_health():
     for i, b in enumerate(data['brands']):
         b['rank'] = i + 1
 
-    prev_data = None
-    if data['prev_period']:
-        prev_calc = _calc_brand_health('1q', category)
-        for brand in prev_calc['brands']:
-            brand['total_score'] = round(sum(brand['dimensions'][k] * weights[k] / 100 for k in weights), 1)
-        prev_calc['brands'].sort(key=lambda b: b['total_score'], reverse=True)
-        for i, b in enumerate(prev_calc['brands']):
-            b['rank'] = i + 1
-        prev_data = {b['brand']: b for b in prev_calc['brands']}
+    last_visit = BrandHealthVisit.query.filter_by(
+        user_id=current_user.id,
+        time_window=time_window,
+        category=category
+    ).order_by(BrandHealthVisit.visited_at.desc()).first()
+
+    prev_snapshot = None
+    if last_visit:
+        prev_snapshot = last_visit.get_snapshot()
 
     for b in data['brands']:
-        if prev_data and b['brand'] in prev_data:
-            prev_brand = prev_data[b['brand']]
-            score_diff = round(b['total_score'] - prev_brand['total_score'], 1)
-            rank_diff = prev_brand['rank'] - b['rank']
+        if prev_snapshot and b['brand'] in prev_snapshot:
+            prev_brand = prev_snapshot[b['brand']]
+            score_diff = round(b['total_score'] - prev_brand.get('total_score', b['total_score']), 1)
+            rank_diff = prev_brand.get('rank', b['rank']) - b['rank']
             b['score_change'] = score_diff
             b['rank_change'] = rank_diff
         else:
             b['score_change'] = 0
             b['rank_change'] = 0
+
+    current_snapshot = {
+        b['brand']: {'total_score': b['total_score'], 'rank': b['rank']}
+        for b in data['brands']
+    }
+    new_visit = BrandHealthVisit(
+        user_id=current_user.id,
+        time_window=time_window,
+        category=category
+    )
+    new_visit.set_snapshot(current_snapshot)
+    db.session.add(new_visit)
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
     data['weights'] = weights
     data['is_admin'] = current_user.role == 'admin'
