@@ -657,9 +657,12 @@ def audit_stats():
     today_count = AuditLog.query.filter(AuditLog.created_at >= today_start_dt).count()
     
     week_ago = datetime.utcnow() - timedelta(days=7)
-    active_admins = db.session.query(func.count(func.distinct(AuditLog.user_id))).filter(
+    active_admins = db.session.query(func.count(func.distinct(AuditLog.user_id))).join(
+        User, AuditLog.user_id == User.id
+    ).filter(
         AuditLog.created_at >= week_ago,
-        AuditLog.user_id.isnot(None)
+        AuditLog.user_id.isnot(None),
+        User.role == 'admin'
     ).scalar()
     
     return jsonify({
@@ -713,7 +716,7 @@ def audit_logs():
         'action': log.action,
         'target': log.target,
         'ip_address': log.ip_address,
-        'created_at': log.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        'created_at': (log.created_at + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
     } for log in pagination.items]
     
     return jsonify({
