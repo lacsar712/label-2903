@@ -2248,6 +2248,13 @@ def delete_compare_report(id):
 
 import secrets
 
+def _utc_to_cn_display(dt):
+    """UTC naive datetime -> Beijing time string for display."""
+    if not dt:
+        return '', ''
+    cn = dt + timedelta(hours=8)
+    return cn.strftime('%Y-%m-%d %H:%M:%S'), '北京时间'
+
 @bp.route("/api/city_compare/share", methods=['POST'])
 @login_required
 def create_share_link():
@@ -2269,10 +2276,12 @@ def create_share_link():
     db.session.add(share)
     db.session.commit()
     log_audit('创建分享链接', f'为报告 {report.report_name} 创建分享链接 (Token: {token[:8]}...)')
+    expire_str, expire_tz = _utc_to_cn_display(expire_at)
     return jsonify({
         'token': token,
         'url': f'/city_compare/share/' + token,
-        'expire_at': expire_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'expire_at': expire_str,
+        'expire_tz': expire_tz,
         'days_valid': 7
     })
 
@@ -2281,10 +2290,10 @@ def view_shared_compare(token):
     share = CompareShareLink.query.filter_by(token=token).first()
     if not share:
         flash('分享链接不存在或已失效', 'danger')
-        return redirect(url_for('main.city_compare'))
+        return redirect(url_for('main.login'))
     if share.is_expired():
         flash('分享链接已过期', 'danger')
-        return redirect(url_for('main.city_compare'))
+        return redirect(url_for('main.login'))
     share.view_count = (share.view_count or 0) + 1
     db.session.commit()
     report = share.report

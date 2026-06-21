@@ -2639,6 +2639,17 @@ input:hover {
     box-shadow: 0 4px 12px rgba(56,189,248,0.35);
 }
 
+.cc-dim-tab.readonly {
+    pointer-events: none;
+    opacity: 0.55;
+    cursor: default;
+}
+
+.cc-dim-tab.readonly:hover {
+    color: var(--text-secondary);
+    background: transparent;
+}
+
 .dim-icon {
     font-size: 15px;
 }

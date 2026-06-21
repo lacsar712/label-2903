@@ -293,6 +293,28 @@
         'anxiety_index': ''
     };
 
+    const DIM_VALUE_KEYS = {
+        'sales': { key: 'total_sales', label: '总销量', unit: '辆', fmt: v => Number(v).toLocaleString() },
+        'avg_price': { key: 'avg_price', label: '平均售价', unit: '万元', fmt: v => v },
+        'bev_ratio': { key: 'bev_ratio', label: '纯电占比', unit: '%', fmt: v => Number(v).toFixed(1) },
+        'pile_density': { key: 'pile_density', label: '充电桩密度', unit: '个/km²', fmt: v => Number(v).toFixed(1) },
+        'anxiety_index': { key: 'anxiety_index', label: '焦虑指数', unit: '', fmt: v => Number(v).toFixed(2) }
+    };
+
+    function normalizeCompareData(raw) {
+        if (!raw) return null;
+        const data = Object.assign({}, raw);
+        if (data.city_a && !data.cityA) data.cityA = data.city_a;
+        if (data.city_b && !data.cityB) data.cityB = data.city_b;
+        if (data.city_ref != null && data.cityRef == null) data.cityRef = data.city_ref;
+        return data;
+    }
+
+    function getRefCity(data) {
+        if (!data) return null;
+        return data.cityRef || data.city_ref || null;
+    }
+
     let state = {
         cityA: '',
         cityB: '',
@@ -347,17 +369,18 @@
         }
         document.querySelectorAll('.cc-dim-tab').forEach(t => {
             t.classList.toggle('active', t.dataset.dim === SHARED_DATA.dimension);
+            t.classList.add('readonly');
         });
         state.cityA = SHARED_DATA.city_a;
         state.cityB = SHARED_DATA.city_b;
-        state.cityRef = SHARED_DATA.city_ref;
-        state.period = SHARED_DATA.period;
+        state.cityRef = SHARED_DATA.city_ref || '';
+        state.period = SHARED_DATA.period || '';
         state.dimension = SHARED_DATA.dimension;
 
         if (SHARED_DATA.snapshot && Object.keys(SHARED_DATA.snapshot).length > 0) {
             applySnapshot(SHARED_DATA.snapshot);
         } else {
-            loadCompareData();
+            document.getElementById('diffItems').innerHTML = '<div class="diff-empty">分享快照不可用</div>';
         }
     }
 
@@ -472,7 +495,11 @@
                 showToast(err.error || '加载数据失败', 'danger');
                 return;
             }
-            const data = await res.json();
+            const data = normalizeCompareData(await res.json());
+            if (!data || !data.cityA || !data.cityB) {
+                showToast('数据格式异常', 'danger');
+                return;
+            }
             state.currentData = data;
             renderAll(data);
             loadBrandCompare();
@@ -496,6 +523,7 @@
 
     function refreshByDimension() {
         renderDiffSummary(state.currentData, state.dimension);
+        renderStats(state.currentData, state.dimension);
         renderBrandHeader();
         if (state.brandData) {
             loadBrandCompare();
@@ -509,7 +537,7 @@
         updateCityTitles(data);
         renderPie(state.pieA, data.cityA);
         renderPie(state.pieB, data.cityB);
-        renderStats(data);
+        renderStats(data, state.dimension);
         renderDualBars(data);
         renderDiffSummary(data, state.dimension);
         renderTrendChart(data);
@@ -517,10 +545,15 @@
     }
 
     function applySnapshot(snap) {
-        state.currentData = snap.main_data;
+        const main = normalizeCompareData(snap.main_data);
+        if (!main || !main.cityA || !main.cityB) {
+            document.getElementById('diffItems').innerHTML = '<div class="diff-empty">报告快照数据不完整</div>';
+            return;
+        }
+        state.currentData = main;
         state.brandData = snap.brand_data;
-        renderAll(snap.main_data);
-        renderBrandChart(snap.brand_data);
+        renderAll(main);
+        if (snap.brand_data) renderBrandChart(snap.brand_data);
     }
 
     function updateCityTitles(data) {
@@ -581,11 +614,33 @@
         }, true);
     }
 
-    function renderStats(data) {
-        document.getElementById('statPriceA').textContent = data.cityA.avg_price || '--';
-        document.getElementById('statRangeA').textContent = data.cityA.avg_range || '--';
-        document.getElementById('statPriceB').textContent = data.cityB.avg_price || '--';
-        document.getElementById('statRangeB').textContent = data.cityB.avg_range || '--';
+    function renderStats(data, dimension) {
+        if (!data || !data.cityA || !data.cityB) return;
+        const dim = dimension || state.dimension || 'sales';
+        const cfg = DIM_VALUE_KEYS[dim] || DIM_VALUE_KEYS.sales;
+        const secondary = dim === 'avg_price'
+            ? { key: 'avg_range', label: '平均续航', unit: 'km', fmt: v => v }
+            : { key: 'avg_price', label: '平均售价', unit: '万元', fmt: v => v };
+
+        function fillPanel(panelSel, city) {
+            const panel = document.querySelector(panelSel);
+            if (!panel || !city) return;
+            const cards = panel.querySelectorAll('.cc-stat-card');
+            if (cards[0]) {
+                cards[0].querySelector('.cc-stat-label').textContent = cfg.label;
+                const v0 = city[cfg.key];
+                cards[0].querySelector('.cc-stat-value').textContent = v0 != null ? cfg.fmt(v0) : '--';
+                cards[0].querySelector('.cc-stat-unit').textContent = cfg.unit;
+            }
+            if (cards[1]) {
+                cards[1].querySelector('.cc-stat-label').textContent = secondary.label;
+                const v1 = city[secondary.key];
+                cards[1].querySelector('.cc-stat-value').textContent = v1 != null ? secondary.fmt(v1) : '--';
+                cards[1].querySelector('.cc-stat-unit').textContent = secondary.unit;
+            }
+        }
+        fillPanel('.panel-a', data.cityA);
+        fillPanel('.panel-b', data.cityB);
     }
 
     function renderDualBars(data) {
@@ -780,9 +835,10 @@
         document.getElementById('brandChartTitle').textContent = title;
 
         const refInd = document.getElementById('refIndicator');
-        if (state.cityRef && state.currentData && state.currentData.city_ref) {
+        const refData = getRefCity(state.currentData);
+        if (state.cityRef && refData) {
             refInd.style.display = '';
-            document.getElementById('refIndicatorText').textContent = state.currentData.city_ref.city;
+            document.getElementById('refIndicatorText').textContent = refData.city;
         } else {
             refInd.style.display = 'none';
         }
@@ -800,7 +856,8 @@
 
         const nameA = state.currentData ? state.currentData.cityA.city : '城市 A';
         const nameB = state.currentData ? state.currentData.cityB.city : '城市 B';
-        const nameRef = state.currentData && state.currentData.city_ref ? state.currentData.city_ref.city : null;
+        const refData = getRefCity(state.currentData);
+        const nameRef = refData ? refData.city : null;
 
         const unit = DIM_UNITS[state.dimension] || '';
         const dimLabel = DIM_LABELS[state.dimension] || '';
@@ -969,10 +1026,7 @@
             });
 
             if (report.snapshot && Object.keys(report.snapshot).length > 0) {
-                state.currentData = report.snapshot.main_data;
-                state.brandData = report.snapshot.brand_data;
-                renderAll(report.snapshot.main_data);
-                renderBrandChart(report.snapshot.brand_data);
+                applySnapshot(report.snapshot);
             } else {
                 loadCompareData();
             }
@@ -1018,6 +1072,10 @@
             showToast('请先选择两座城市', 'warning');
             return;
         }
+        if (!state.currentData || !state.currentData.cityA || !state.brandData) {
+            showToast('请先等待对比数据加载完成', 'warning');
+            return;
+        }
         const name = document.getElementById('reportNameInput').value.trim();
         const snapshot = {
             main_data: state.currentData,
@@ -1056,10 +1114,13 @@
                 });
             }
             const d = await res.json();
-            if (d.status === 'created' || d.status === 'updated') {
-                state.savedReportId = d.id || state.savedReportId;
+            if (d.status === 'created') {
+                state.savedReportId = d.id;
                 closeSaveReportModal();
-                showToast(state.savedReportId ? '报告已更新' : '报告已保存', 'success');
+                showToast('报告已保存', 'success');
+            } else if (d.status === 'updated') {
+                closeSaveReportModal();
+                showToast('报告已更新', 'success');
             } else {
                 showToast(d.error || '保存失败', 'danger');
             }
@@ -1078,30 +1139,44 @@
         }
         const modal = document.getElementById('shareModal');
         document.getElementById('shareResultArea').style.display = 'none';
-        document.getElementById('shareLoading').style.display = '';
+        const shareLoading = document.getElementById('shareLoading');
+        shareLoading.style.display = '';
+        shareLoading.innerHTML = '正在生成分享链接...';
         modal.style.display = 'flex';
 
         (async () => {
             try {
+                if (!state.currentData || !state.currentData.cityA) {
+                    throw new Error('对比数据尚未加载');
+                }
+                const snapshot = { main_data: state.currentData, brand_data: state.brandData };
+                const reportPayload = {
+                    city_a: state.cityA,
+                    city_b: state.cityB,
+                    city_ref: state.cityRef,
+                    period: state.period,
+                    dimension: state.dimension,
+                    snapshot: snapshot
+                };
+
                 if (!state.savedReportId) {
-                    const snapshot = { main_data: state.currentData, brand_data: state.brandData };
                     const autoName = `${state.cityA} vs ${state.cityB} ${state.period || Date.now()}`;
                     const createRes = await fetch('/api/city_compare/reports', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            report_name: autoName,
-                            city_a: state.cityA,
-                            city_b: state.cityB,
-                            city_ref: state.cityRef,
-                            period: state.period,
-                            dimension: state.dimension,
-                            snapshot: snapshot
-                        })
+                        body: JSON.stringify(Object.assign({ report_name: autoName }, reportPayload))
                     });
                     const cd = await createRes.json();
                     if (!cd.id) throw new Error(cd.error || '保存失败');
                     state.savedReportId = cd.id;
+                } else {
+                    const updateRes = await fetch(`/api/city_compare/reports/${state.savedReportId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(reportPayload)
+                    });
+                    const ud = await updateRes.json();
+                    if (ud.status !== 'updated') throw new Error(ud.error || '更新报告失败');
                 }
                 const shareRes = await fetch('/api/city_compare/share', {
                     method: 'POST',
@@ -1112,7 +1187,8 @@
                 if (!sd.token) throw new Error(sd.error || '生成失败');
                 const fullUrl = window.location.origin + sd.url;
                 document.getElementById('shareUrlInput').value = fullUrl;
-                document.getElementById('shareExpire').textContent = sd.expire_at;
+                const expireText = sd.expire_at + (sd.expire_tz ? ' ' + sd.expire_tz : '');
+                document.getElementById('shareExpire').textContent = expireText;
                 document.getElementById('shareLoading').style.display = 'none';
                 document.getElementById('shareResultArea').style.display = '';
             } catch (e) {
