@@ -2077,7 +2077,7 @@ def get_brand_sales_compare():
             func.sum(SalesData.quantity).label('qty'),
             func.avg(CarModel.price).label('avg_price'),
             func.avg(CarModel.range_km).label('avg_range'),
-            func.sum(db.case([(CarModel.category == '纯电', SalesData.quantity)], else_=0)).label('bev_qty')
+            func.sum(db.case((CarModel.category == '纯电', SalesData.quantity), else_=0)).label('bev_qty')
         ).select_from(SalesData).join(CarModel).filter(
             SalesData.region == city,
             SalesData.period == period
