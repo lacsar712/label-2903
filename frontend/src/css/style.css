@@ -522,6 +522,21 @@ input:hover {
     background: rgba(30, 41, 59, 0.9);
 }
 
+.compare-slot.slot-active {
+    border-color: var(--accent-color);
+    border-style: solid;
+    box-shadow: 0 0 20px rgba(56, 189, 248, 0.25);
+    background: rgba(56, 189, 248, 0.05);
+}
+
+.compare-slot.slot-active .slot-plus {
+    color: var(--accent-color);
+}
+
+.compare-slot.slot-active .slot-label {
+    color: var(--accent-color);
+}
+
 .compare-slot .slot-placeholder {
     text-align: center;
 }

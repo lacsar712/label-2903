@@ -26,7 +26,7 @@
             <button class="slot-remove" onclick="removeCar(0)">&#10005;</button>
         </div>
     </div>
-    <div class="compare-vs">VS</div>
+    <div class="compare-vs" id="vs-0">VS</div>
     <div class="compare-slot" id="slot-1" data-index="1">
         <div class="slot-placeholder">
             <div class="slot-plus">+</div>
@@ -38,7 +38,7 @@
             <button class="slot-remove" onclick="removeCar(1)">&#10005;</button>
         </div>
     </div>
-    <div class="compare-vs">VS</div>
+    <div class="compare-vs" id="vs-1">VS</div>
     <div class="compare-slot" id="slot-2" data-index="2">
         <div class="slot-placeholder">
             <div class="slot-plus">+</div>
@@ -78,6 +78,7 @@
     var selectedCars = [null, null, null];
     var radarChart = null;
     var searchTimer = null;
+    var activeSlot = -1;
 
     var SLOT_COLORS = ['#38bdf8', '#a78bfa', '#f472b6'];
     var SLOT_FILLS = ['rgba(56,189,248,0.25)', 'rgba(167,139,250,0.25)', 'rgba(244,114,182,0.25)'];
@@ -105,6 +106,7 @@
                 if (e.target.closest('.slot-remove')) return;
                 var idx = parseInt(slot.dataset.index);
                 if (!selectedCars[idx]) {
+                    setActiveSlot(idx);
                     input.focus();
                 }
             });
@@ -147,16 +149,32 @@
         });
     }
 
+    function setActiveSlot(idx) {
+        activeSlot = idx;
+        for (var i = 0; i < 3; i++) {
+            var s = document.getElementById('slot-' + i);
+            if (!selectedCars[i]) {
+                if (i === idx) s.classList.add('slot-active');
+                else s.classList.remove('slot-active');
+            }
+        }
+    }
+
     function addCar(car) {
-        var idx = selectedCars.indexOf(null);
+        var idx = activeSlot;
+        if (idx < 0 || idx > 2 || selectedCars[idx] !== null) {
+            idx = selectedCars.indexOf(null);
+        }
         if (idx === -1) { showToast('最多选择三款车型', 'danger'); return; }
         selectedCars[idx] = car;
+        activeSlot = -1;
         updateSlots();
         refreshData();
     }
 
     window.removeCar = function(idx) {
         selectedCars[idx] = null;
+        if (activeSlot === idx) activeSlot = -1;
         updateSlots();
         refreshData();
     };
@@ -172,12 +190,22 @@
                 filled.style.borderColor = SLOT_COLORS[i];
                 document.getElementById('slotName-' + i).textContent = selectedCars[i].model_name;
                 document.getElementById('slotBrand-' + i).textContent = selectedCars[i].brand;
+                slot.classList.remove('slot-active');
             } else {
                 placeholder.style.display = 'block';
                 filled.style.display = 'none';
                 filled.style.borderColor = '';
+                if (i === activeSlot) slot.classList.add('slot-active');
+                else slot.classList.remove('slot-active');
             }
         }
+        var vs0 = document.getElementById('vs-0');
+        var vs1 = document.getElementById('vs-1');
+        var count = selectedCars.filter(Boolean).length;
+        var activeIndices = [];
+        for (var k = 0; k < 3; k++) { if (selectedCars[k]) activeIndices.push(k); }
+        vs0.style.display = (activeIndices.includes(0) && activeIndices.includes(1)) ? 'block' : 'none';
+        vs1.style.display = (activeIndices.includes(1) && activeIndices.includes(2)) ? 'block' : 'none';
     }
 
     async function refreshData() {
