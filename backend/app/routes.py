@@ -522,8 +522,7 @@ def _export_excel(df, filename_prefix):
 @bp.route("/api/export/cars")
 @login_required
 def export_cars():
-    query = CarModel.query
-    query = apply_car_filters(query)
+    city = request.args.get('city')
     
     sort_field = request.args.get('sort_field', 'model_name')
     sort_order = request.args.get('sort_order', 'asc')
@@ -535,19 +534,30 @@ def export_cars():
         'power': CarModel.power_consumption,
     }
     
-    if sort_field == 'sales':
+    if sort_field == 'sales' or city:
         query = db.session.query(
             CarModel.id, CarModel.brand, CarModel.model_name,
             CarModel.category, CarModel.price, CarModel.range_km,
             CarModel.power_consumption, CarModel.weight_kg,
             func.sum(SalesData.quantity).label('total_sales')
-        ).join(SalesData).group_by(CarModel.id)
+        ).select_from(CarModel).join(SalesData).group_by(CarModel.id)
         query = apply_car_filters(query)
-        if sort_order == 'desc':
-            query = query.order_by(func.sum(SalesData.quantity).desc())
+        if city:
+            query = query.filter(SalesData.region.like(f"%{city}%"))
+        if sort_field == 'sales':
+            if sort_order == 'desc':
+                query = query.order_by(func.sum(SalesData.quantity).desc())
+            else:
+                query = query.order_by(func.sum(SalesData.quantity).asc())
         else:
-            query = query.order_by(func.sum(SalesData.quantity).asc())
+            col = field_map.get(sort_field, CarModel.model_name)
+            if sort_order == 'desc':
+                query = query.order_by(col.desc())
+            else:
+                query = query.order_by(col.asc())
     else:
+        query = CarModel.query
+        query = apply_car_filters(query)
         col = field_map.get(sort_field, CarModel.model_name)
         if sort_order == 'desc':
             query = query.order_by(col.desc())
@@ -556,7 +566,7 @@ def export_cars():
     
     cars = query.all()
     
-    if sort_field == 'sales':
+    if sort_field == 'sales' or city:
         data = [{
             '品牌': c.brand,
             '车型': c.model_name,
@@ -579,7 +589,8 @@ def export_cars():
         } for c in cars]
     
     df = pd.DataFrame(data)
-    return _export_excel(df, '车型档案')
+    prefix = f'车型档案_{city}' if city else '车型档案'
+    return _export_excel(df, prefix)
 
 @bp.route("/api/export/sales")
 @login_required

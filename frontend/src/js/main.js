@@ -388,13 +388,13 @@ window.addEventListener('load', () => {
         });
 
         // Debounced refresh for number inputs
-        let debounceTimer;
+        window._filterDebounceTimer = null;
         const numInputs = ['priceMin', 'priceMax', 'rangeMin'];
         numInputs.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.oninput = () => {
-                clearTimeout(debounceTimer);
-                debounceTimer = setTimeout(refreshCharts, 500);
+                clearTimeout(window._filterDebounceTimer);
+                window._filterDebounceTimer = setTimeout(refreshCharts, 500);
             };
         });
     }
@@ -452,9 +452,48 @@ window.addEventListener('resize', () => {
     Object.values(charts).forEach(c => c.resize());
 });
 
+function updateExportPanelInfo() {
+    const brand = document.getElementById('brandFilter').value;
+    const city = document.getElementById('cityFilter').value;
+    const pMin = document.getElementById('priceMin').value;
+    const pMax = document.getElementById('priceMax').value;
+    const rMin = document.getElementById('rangeMin').value;
+    const cats = Array.from(document.querySelectorAll('.cat-filter:checked')).map(cb => cb.value);
+
+    const parts = [];
+    if (brand) parts.push(`品牌: ${brand}`);
+    if (city) parts.push(`城市: ${city}`);
+    if (pMin || pMax) parts.push(`价格: ${pMin || '0'} - ${pMax || '∞'} 万`);
+    if (rMin) parts.push(`续航 ≥ ${rMin} km`);
+    if (cats.length < 2 && cats.length > 0) parts.push(`动力: ${cats.join('/')}`);
+
+    const summaryEl = document.getElementById('exportFilterSummary');
+    if (summaryEl) {
+        if (parts.length > 0) {
+            summaryEl.style.display = 'block';
+            summaryEl.innerHTML = `<span class="summary-label">当前筛选：</span>${parts.join(' · ')}`;
+        } else {
+            summaryEl.style.display = 'none';
+        }
+    }
+
+    const carsNote = document.getElementById('carsCityNote');
+    const salesNote = document.getElementById('salesCityNote');
+    if (carsNote) {
+        carsNote.textContent = city ? `（仅含${city}有销量的车型）` : '';
+    }
+    if (salesNote) {
+        salesNote.textContent = city ? `（仅含${city}区域销量）` : '';
+    }
+}
+
 function toggleExportPanel() {
     const panel = document.getElementById('exportPanel');
     if (panel) {
+        const willShow = !panel.classList.contains('show');
+        if (willShow) {
+            updateExportPanelInfo();
+        }
         panel.classList.toggle('show');
     }
 }
@@ -467,14 +506,7 @@ document.addEventListener('click', function(e) {
     }
 });
 
-function exportData(type) {
-    const params = getFilterParams();
-    const endpoint = type === 'cars' ? '/api/export/cars' : '/api/export/sales';
-    const label = type === 'cars' ? '车型档案' : '销量汇总';
-
-    showToast(`正在导出${label}，请稍候...`, 'info');
-    toggleExportPanel();
-
+function doExport(endpoint, params, label) {
     fetch(endpoint + params)
         .then(response => {
             if (!response.ok) {
@@ -505,6 +537,34 @@ function exportData(type) {
             console.error('Export error:', err);
             showToast(`${label}导出失败，请重试`, 'danger');
         });
+}
+
+function exportData(type) {
+    if (window._filterDebounceTimer) {
+        clearTimeout(window._filterDebounceTimer);
+        window._filterDebounceTimer = null;
+    }
+
+    const params = getFilterParams();
+    const endpoint = type === 'cars' ? '/api/export/cars' : '/api/export/sales';
+    const label = type === 'cars' ? '车型档案' : '销量汇总';
+
+    showToast(`正在同步看板数据并导出${label}...`, 'info');
+    toggleExportPanel();
+
+    const pending = [];
+    if (typeof loadBarChart === 'function') pending.push(loadBarChart());
+    if (typeof loadScatterChart === 'function') pending.push(loadScatterChart());
+    if (typeof loadMapChart === 'function') pending.push(loadMapChart());
+    if (typeof loadPriceDistChart === 'function') pending.push(loadPriceDistChart());
+
+    if (pending.length > 0) {
+        Promise.all(pending).finally(() => {
+            doExport(endpoint, params, label);
+        });
+    } else {
+        doExport(endpoint, params, label);
+    }
 }
 
 let activeAnnouncements = [];

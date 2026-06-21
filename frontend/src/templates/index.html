@@ -91,20 +91,21 @@
                 <button class="export-close" onclick="toggleExportPanel()">&times;</button>
             </div>
             <div class="export-panel-body">
-                <p class="export-tip">导出结果与当前看板所见数据保持一致，方便线下汇报与二次分析。</p>
+                <p class="export-tip">导出结果与当前看板所见数据保持一致。导出前会自动同步最新筛选，确保图表与表格范围一致。</p>
+                <div id="exportFilterSummary" class="export-filter-summary"></div>
                 <div class="export-options">
                     <div class="export-option" onclick="exportData('cars')">
                         <div class="export-icon">📋</div>
                         <div class="export-info">
                             <div class="export-title">车型档案</div>
-                            <div class="export-desc">品牌、车型、动力类型、价格、续航、电耗、车重</div>
+                            <div class="export-desc">品牌、车型、动力类型、价格、续航、电耗、车重<span class="export-note" id="carsCityNote"></span></div>
                         </div>
                     </div>
                     <div class="export-option" onclick="exportData('sales')">
                         <div class="export-icon">📊</div>
                         <div class="export-info">
                             <div class="export-title">销量汇总</div>
-                            <div class="export-desc">品牌、车型、区域销量、周期销量等详细数据</div>
+                            <div class="export-desc">品牌、车型、区域销量、周期销量等详细数据<span class="export-note" id="salesCityNote"></span></div>
                         </div>
                     </div>
                 </div>
