@@ -101,7 +101,7 @@ class UserPreference(db.Model):
             'sort_field': 'model_name',
             'sort_order': 'asc',
             'map_mode': 'sales',
-            'expanded_charts': ['barChart', 'pieChart', 'lineChart', 'mapChart', 'scatterChart']
+            'expanded_charts': ['barChart', 'priceDistChart', 'pieChart', 'lineChart', 'mapChart', 'scatterChart']
         }
 
 class AnnouncementRead(db.Model):

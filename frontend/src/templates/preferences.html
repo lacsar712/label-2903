@@ -143,6 +143,9 @@
                             <input type="checkbox" class="cfg-chart-cb" value="barChart"> 车型参数对比
                         </label>
                         <label class="pref-checkbox-item">
+                            <input type="checkbox" class="cfg-chart-cb" value="priceDistChart"> 价格带分布
+                        </label>
+                        <label class="pref-checkbox-item">
                             <input type="checkbox" class="cfg-chart-cb" value="pieChart"> 品牌份额分布
                         </label>
                         <label class="pref-checkbox-item">
@@ -220,7 +223,7 @@ function applyConfigToForm(config) {
     document.getElementById('cfgCatBEV').checked = cats.includes('纯电');
     document.getElementById('cfgCatPHEV').checked = cats.includes('混动');
 
-    const expanded = config.expanded_charts || ['barChart', 'pieChart', 'lineChart', 'mapChart', 'scatterChart'];
+    const expanded = config.expanded_charts || ['barChart', 'priceDistChart', 'pieChart', 'lineChart', 'mapChart', 'scatterChart'];
     document.querySelectorAll('.cfg-chart-cb').forEach(cb => {
         cb.checked = expanded.includes(cb.value);
     });
@@ -284,7 +287,7 @@ function createNewScheme() {
     applyConfigToForm({
         brand: '', city: '北京', price_min: '', price_max: '', range_min: '',
         categories: ['纯电', '混动'], sort_field: 'model_name', sort_order: 'asc',
-        map_mode: 'sales', expanded_charts: ['barChart', 'pieChart', 'lineChart', 'mapChart', 'scatterChart']
+        map_mode: 'sales', expanded_charts: ['barChart', 'priceDistChart', 'pieChart', 'lineChart', 'mapChart', 'scatterChart']
     });
     document.getElementById('btnActivate').textContent = '⚡ 设为当前';
     document.getElementById('btnActivate').disabled = false;
