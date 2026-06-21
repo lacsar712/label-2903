@@ -719,7 +719,19 @@ function openAnnouncementPanel(id) {
         });
 }
 
+function canCloseAnnouncementPanel() {
+    const confirmBtn = document.getElementById('panelConfirmBtn');
+    if (confirmBtn && confirmBtn.style.display !== 'none') {
+        showToast('请先确认已读此公告', 'warning');
+        return false;
+    }
+    return true;
+}
+
 function closeAnnouncementPanel() {
+    if (!canCloseAnnouncementPanel()) {
+        return;
+    }
     const panel = document.getElementById('announcementPanel');
     if (panel) {
         panel.style.display = 'none';
@@ -772,11 +784,6 @@ document.addEventListener('click', function(e) {
     if (panelOverlay && panelOverlay.style.display === 'flex' && e.target === panelOverlay) {
         const panel = panelOverlay.querySelector('.announcement-panel');
         if (panel && !panel.contains(e.target)) {
-            const confirmBtn = document.getElementById('panelConfirmBtn');
-            if (confirmBtn && confirmBtn.style.display !== 'none') {
-                showToast('请先确认已读此公告', 'warning');
-                return;
-            }
             closeAnnouncementPanel();
         }
     }

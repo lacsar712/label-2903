@@ -1039,6 +1039,10 @@ def get_announcements_history():
     
     if current_user.role != 'admin':
         query = query.filter(Announcement.audience == 'all')
+        now = datetime.utcnow()
+        query = query.filter(
+            or_(Announcement.effective_at.is_(None), Announcement.effective_at <= now)
+        )
     
     if category:
         query = query.filter(Announcement.category == category)
@@ -1098,6 +1102,9 @@ def get_announcement_detail(id):
     
     if a.audience != 'all' and current_user.role != 'admin':
         return jsonify({'error': '无权限'}), 403
+    
+    if current_user.role != 'admin' and a.effective_at and a.effective_at > datetime.utcnow():
+        return jsonify({'error': '公告尚未生效'}), 403
     
     is_read = AnnouncementRead.query.filter_by(
         announcement_id=id,
