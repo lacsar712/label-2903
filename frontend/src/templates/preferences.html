@@ -337,14 +337,49 @@ async function saveScheme() {
 }
 
 async function activateScheme() {
-    if (!currentSchemeId) return;
+    const name = document.getElementById('schemeNameInput').value.trim();
+    if (!name) {
+        showToast('请先输入方案名称', 'danger');
+        return;
+    }
+    const config = gatherConfig();
+
     try {
-        const res = await fetch(`/api/preferences/${currentSchemeId}/activate`, { method: 'POST' });
-        const data = await res.json();
-        if (res.ok) {
-            showToast('已切换为当前方案', 'success');
+        let targetId = currentSchemeId;
+
+        if (currentSchemeId) {
+            const res = await fetch(`/api/preferences/${currentSchemeId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scheme_name: name, config: config })
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                showToast(data.error || '保存失败', 'danger');
+                return;
+            }
+        } else {
+            const res = await fetch('/api/preferences', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scheme_name: name, config: config })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showToast(data.error || '创建失败', 'danger');
+                return;
+            }
+            targetId = data.id;
+            currentSchemeId = data.id;
+        }
+
+        const activateRes = await fetch(`/api/preferences/${targetId}/activate`, { method: 'POST' });
+        if (activateRes.ok) {
+            showToast('已保存并设为当前方案', 'success');
             await loadSchemes();
-            selectScheme(currentSchemeId);
+            selectScheme(targetId);
+        } else {
+            showToast('设为当前失败', 'danger');
         }
     } catch (e) {
         showToast('操作失败', 'danger');
@@ -445,6 +480,10 @@ async function importSchemes(event) {
         if (data.need_resolution) {
             pendingConflicts = data.conflicts;
             showConflictModal(data.conflicts);
+            await loadSchemes();
+            if (data.imported_count > 0) {
+                showToast(`${data.imported_count} 套新方案已导入，另有 ${data.conflicts.length} 套存在冲突`, 'info');
+            }
             return;
         }
 
@@ -464,9 +503,9 @@ function showConflictModal(conflicts) {
     const body = document.getElementById('conflictBody');
     body.innerHTML = conflicts.map(c => `
         <div class="conflict-item">
-            <div class="conflict-name">「${escapeHtml(c.name)}」</div>
+            <div class="conflict-name">「${escapeHtml(c.scheme_name)}」</div>
             <div class="conflict-label">已存在同名方案，请选择处理方式：</div>
-            <select class="conflict-select" data-name="${escapeHtml(c.name)}">
+            <select class="conflict-select" data-name="${escapeHtml(c.scheme_name)}">
                 <option value="skip">跳过</option>
                 <option value="overwrite">覆盖已有</option>
                 <option value="merge">合并配置</option>

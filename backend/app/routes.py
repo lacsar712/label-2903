@@ -1736,32 +1736,41 @@ def import_preferences():
         return jsonify({'error': '文件格式错误，数据应为数组'}), 400
 
     conflicts = []
+    non_conflict_count = 0
     for item in import_data:
         name = item.get('scheme_name', '').strip()
         if not name:
             continue
         existing = UserPreference.query.filter_by(user_id=current_user.id, scheme_name=name).first()
         if existing:
-            conflicts.append({'name': name, 'existing_id': existing.id, 'import_config': item.get('config', {})})
+            conflicts.append({
+                'scheme_name': name,
+                'config': item.get('config', {}),
+                'existing_id': existing.id
+            })
+        else:
+            pref = UserPreference(
+                user_id=current_user.id,
+                scheme_name=name,
+                is_active=item.get('is_active', False)
+            )
+            pref.set_config(item.get('config', UserPreference.default_config()))
+            db.session.add(pref)
+            non_conflict_count += 1
 
     if conflicts:
-        return jsonify({'conflicts': conflicts, 'need_resolution': True})
-
-    for item in import_data:
-        name = item.get('scheme_name', '').strip()
-        if not name:
-            continue
-        pref = UserPreference(
-            user_id=current_user.id,
-            scheme_name=name,
-            is_active=item.get('is_active', False)
-        )
-        pref.set_config(item.get('config', UserPreference.default_config()))
-        db.session.add(pref)
+        db.session.commit()
+        if non_conflict_count > 0:
+            log_audit('导入偏好方案', f'导入 {non_conflict_count} 套无冲突偏好方案')
+        return jsonify({
+            'conflicts': conflicts,
+            'need_resolution': True,
+            'imported_count': non_conflict_count
+        })
 
     db.session.commit()
     log_audit('导入偏好方案', f'导入 {len(import_data)} 套偏好方案')
-    return jsonify({'status': 'imported', 'count': len(import_data)})
+    return jsonify({'status': 'imported', 'count': non_conflict_count})
 
 @bp.route("/api/preferences/import_resolve", methods=['POST'])
 @login_required
