@@ -1411,38 +1411,48 @@ def anxiety_index_api():
             idx = periods.index(period)
             compare_period = periods[idx - 1] if idx > 0 else ''
 
-    categories = ['纯电'] if (bev_only or exclude_phev) else ['纯电', '混动']
-
-    current_sales = _calc_region_sales(period, categories)
+    default_categories = ['纯电', '混动']
+    current_sales_full = _calc_region_sales(period, default_categories)
+    compare_sales_full = _calc_region_sales(compare_period, default_categories) if compare_period else {}
 
     piles = ChargingPile.query.all()
     pile_map = {p.province: p.density for p in piles}
 
-    compare_sales = _calc_region_sales(compare_period, categories) if compare_period else {}
-
     provinces_data = []
-    all_regions = set(list(current_sales.keys()) + list(pile_map.keys()))
+    all_regions = set(list(current_sales_full.keys()) + list(pile_map.keys()))
+
+    def _get_index_input(sales_info, mode_bev_only, mode_exclude_phev):
+        if mode_bev_only:
+            return float(sales_info.get('bev_sales', 0))
+        elif mode_exclude_phev:
+            return 100.0
+        else:
+            return float(sales_info.get('bev_ratio', 0))
 
     for region in all_regions:
-        sales_info = current_sales.get(region, {'total_sales': 0, 'bev_sales': 0, 'bev_ratio': 0})
+        sales_info = current_sales_full.get(region, {'total_sales': 0, 'bev_sales': 0, 'bev_ratio': 0})
         density = pile_map.get(region, 0)
-        index_val = _calc_anxiety_index(sales_info['bev_ratio'], density, formula)
+        index_input = _get_index_input(sales_info, bev_only, exclude_phev)
+        index_val = _calc_anxiety_index(index_input, density, formula)
 
-        compare_info = compare_sales.get(region, {'bev_ratio': 0})
-        prev_index = _calc_anxiety_index(compare_info['bev_ratio'], pile_map.get(region, 0), formula)
+        compare_info = compare_sales_full.get(region, {'bev_ratio': 0, 'bev_sales': 0})
+        prev_index_input = _get_index_input(compare_info, bev_only, exclude_phev)
+        prev_index = _calc_anxiety_index(prev_index_input, pile_map.get(region, 0), formula)
+
+        displayed_ratio = 100.0 if exclude_phev else sales_info.get('bev_ratio', 0)
 
         ring_change = None
         if prev_index is not None and index_val is not None and prev_index > 0:
             pct = round((index_val - prev_index) / prev_index * 100, 1)
             ring_change = {'pct': pct, 'up': pct >= 0}
 
-        level, advice = _get_province_suggestion(region, index_val or 0, sales_info['bev_ratio'], density)
+        level, advice = _get_province_suggestion(region, index_val or 0, displayed_ratio, density)
 
         provinces_data.append({
             'name': region,
             'total_sales': sales_info['total_sales'],
             'bev_sales': sales_info['bev_sales'],
-            'bev_ratio': sales_info['bev_ratio'],
+            'bev_ratio': round(displayed_ratio, 2),
             'density': density,
             'index': index_val if index_val is not None else 0,
             'prev_index': prev_index if prev_index is not None else 0,
@@ -1469,10 +1479,31 @@ def anxiety_index_api():
     top10 = valid_provinces[:10]
     bottom10 = valid_provinces[-10:][::-1]
 
-    formula_info = {
-        'default': {'name': '默认公式', 'desc': '焦虑指数 = 纯电占比 / 桩密度'},
-        'weighted': {'name': '加权公式', 'desc': '焦虑指数 = 纯电占比^1.5 / 桩密度^0.5（销量权重更高）'},
-        'conservative': {'name': '保守公式', 'desc': '焦虑指数 = 纯电占比^0.5 / 桩密度^1.5（密度权重更高）'}
+    mode_label = '默认口径'
+    if bev_only:
+        mode_label = '纯电销量绝对值口径'
+    elif exclude_phev:
+        mode_label = '排除混动（理论100%纯电）口径'
+
+    numerator_desc = '纯电占比'
+    if bev_only:
+        numerator_desc = '纯电销量（辆）'
+    elif exclude_phev:
+        numerator_desc = '100（理论纯电占比）'
+
+    formula_info_map = {
+        'default': {
+            'name': '默认公式',
+            'desc': f'焦虑指数 = {numerator_desc} / 桩密度  ·  [{mode_label}]'
+        },
+        'weighted': {
+            'name': '加权公式',
+            'desc': f'焦虑指数 = {numerator_desc}^1.5 / 桩密度^0.5（销量权重更高） ·  [{mode_label}]'
+        },
+        'conservative': {
+            'name': '保守公式',
+            'desc': f'焦虑指数 = {numerator_desc}^0.5 / 桩密度^1.5（密度权重更高） ·  [{mode_label}]'
+        }
     }
 
     return jsonify({
@@ -1480,7 +1511,9 @@ def anxiety_index_api():
         'current_period': period,
         'compare_period': compare_period,
         'formula': formula,
-        'formula_info': formula_info.get(formula, formula_info['default']),
+        'mode': 'bev_only' if bev_only else ('exclude_phev' if exclude_phev else 'default'),
+        'mode_label': mode_label,
+        'formula_info': formula_info_map.get(formula, formula_info_map['default']),
         'map_data': [{'name': p['name'], 'value': p['index']} for p in provinces_data if p['index'] > 0],
         'provinces': provinces_data,
         'top10': top10,

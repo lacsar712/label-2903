@@ -715,11 +715,13 @@ function renderAnxietyMap(data) {
 function renderAnxietyBar(data) {
     if (!anxietyCharts.bar) return;
     const top10 = data.top10.slice().reverse();
-    const names = top10.map(p => {
+    const fullNames = top10.map(p => p.name);
+    const shortNames = top10.map(p => {
         return p.name.replace(/市$|省$|壮族自治区$|回族自治区$|维吾尔自治区$|自治区$|特别行政区$/, '');
     });
+    const fullToShort = {};
+    fullNames.forEach((fn, i) => fullToShort[fn] = shortNames[i]);
     const values = top10.map(p => p.index);
-    const fullNames = top10.map(p => p.name);
     const changes = top10.map(p => p.ring_change);
 
     const option = {
@@ -730,8 +732,8 @@ function renderAnxietyBar(data) {
             borderColor: '#334155',
             textStyle: { color: '#fff', fontSize: 12 },
             formatter: function(params) {
-                const idx = params[0].dataIndex;
-                return buildTooltipHtml({ name: fullNames[idx] });
+                const fn = params[0].name;
+                return buildTooltipHtml({ name: fn });
             }
         },
         grid: { left: '80', right: '40', top: '10', bottom: '20' },
@@ -744,8 +746,11 @@ function renderAnxietyBar(data) {
         },
         yAxis: {
             type: 'category',
-            data: names,
+            data: fullNames,
             axisLabel: {
+                formatter: function(val) {
+                    return fullToShort[val] || val;
+                },
                 color: function(value, index) {
                     const realIdx = top10.length - 1 - index;
                     const colors = ['#f43f5e', '#f97316', '#f59e0b', '#fbbf24', '#fde047'];
