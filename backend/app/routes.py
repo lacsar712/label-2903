@@ -48,6 +48,9 @@ def login():
         if user and bcrypt.check_password_hash(user.password, password):
             login_user(user)
             log_audit('用户登录', f'用户 {username} 登录系统')
+            next_page = request.form.get('next') or request.args.get('next')
+            if next_page and next_page.startswith('/'):
+                return redirect(next_page)
             return redirect(url_for('main.home'))
         else:
             flash('登录失败，请检查用户名或密码', 'danger')

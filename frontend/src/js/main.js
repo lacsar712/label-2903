@@ -1007,6 +1007,19 @@ async function renderRegionMap(regions) {
             data: regions
         }]
     });
+
+    chart.on('click', function (params) {
+        if (!params.name) return;
+        const barContainer = document.getElementById('regionBarChart');
+        if (!barContainer) return;
+        barContainer.querySelectorAll('.region-bar-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.region === params.name);
+        });
+        const targetItem = barContainer.querySelector(`.region-bar-item[data-region="${params.name}"]`);
+        if (targetItem) {
+            targetItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    });
 }
 
 function renderRegionBars(regions) {

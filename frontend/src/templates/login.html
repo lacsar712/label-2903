@@ -5,6 +5,7 @@
     <div class="auth-card">
         <h2>系统登录</h2>
         <form method="POST">
+            <input type="hidden" name="next" value="{{ request.args.get('next', '') }}">
             <div class="form-group">
                 <label>用户名</label>
                 <input type="text" name="username" placeholder="请输入用户名" required>
