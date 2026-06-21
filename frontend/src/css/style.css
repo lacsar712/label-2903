@@ -2798,6 +2798,38 @@ input:hover {
     background: linear-gradient(90deg, rgba(239,68,68,0.04) 0%, rgba(244,114,182,0.1) 100%);
 }
 
+.diff-item.diff-active {
+    transform: scale(1.02);
+    box-shadow: 0 4px 20px rgba(129,140,248,0.25);
+    border-width: 2px !important;
+    opacity: 1 !important;
+}
+
+.diff-item.diff-dimmed {
+    opacity: 0.55;
+    transform: scale(0.97);
+    transition: all 0.3s ease;
+}
+
+.diff-item.diff-dimmed:hover {
+    opacity: 0.85;
+    transform: scale(0.99);
+}
+
+.diff-current-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    background: linear-gradient(135deg, #818cf8, #a78bfa);
+    color: white;
+    font-size: 10px;
+    border-radius: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+    margin-left: 6px;
+    text-transform: none;
+}
+
 .diff-label {
     font-size: 11px;
     color: var(--text-secondary);

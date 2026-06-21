@@ -495,7 +495,7 @@
     }
 
     function refreshByDimension() {
-        renderDiffSummary(state.currentData);
+        renderDiffSummary(state.currentData, state.dimension);
         renderBrandHeader();
         if (state.brandData) {
             loadBrandCompare();
@@ -511,7 +511,7 @@
         renderPie(state.pieB, data.cityB);
         renderStats(data);
         renderDualBars(data);
-        renderDiffSummary(data);
+        renderDiffSummary(data, state.dimension);
         renderTrendChart(data);
         renderBrandHeader();
     }
@@ -602,7 +602,7 @@
         document.getElementById('pileBarB').style.width = (data.cityB.pile_density / maxPile * 100).toFixed(1) + '%';
     }
 
-    function renderDiffSummary(data) {
+    function renderDiffSummary(data, activeDim) {
         const container = document.getElementById('diffItems');
         const items = data.diff_summary || [];
         if (items.length === 0) {
@@ -625,14 +625,16 @@
                 colorClass = 'diff-b-better';
                 arrow = '▶';
             }
+            const isActive = activeDim && item.key === activeDim;
+            const activeClass = isActive ? 'diff-active' : 'diff-dimmed';
             const diffDisplay = item.key === 'avg_price' ? diffVal.toFixed(2) :
                               (item.key === 'sales' || item.key === 'bev_ratio' || item.key === 'pile_density' || item.key === 'anxiety_index' || item.key === 'avg_range'
                               ? (Math.abs(diffVal) >= 1 ? diffVal.toFixed(1) : diffVal.toFixed(2))
                               : diffVal.toFixed(2));
             const pctDisplay = Math.abs(pct) >= 0.1 ? pctSign + pct.toFixed(1) + '%' : '≈ 0%';
             return `
-                <div class="diff-item ${colorClass}">
-                    <div class="diff-label">${item.label}</div>
+                <div class="diff-item ${colorClass} ${activeClass}">
+                    <div class="diff-label">${item.label}${isActive ? ' <span class="diff-current-tag">当前维度</span>' : ''}</div>
                     <div class="diff-metrics">
                         <div class="diff-side">
                             <span class="diff-val-a">${formatDimVal(item.value_a, item.key)}</span>
@@ -1037,7 +1039,14 @@
                 res = await fetch(`/api/city_compare/reports/${state.savedReportId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ snapshot: snapshot, period: state.period, dimension: state.dimension })
+                    body: JSON.stringify({
+                        snapshot: snapshot,
+                        city_a: state.cityA,
+                        city_b: state.cityB,
+                        city_ref: state.cityRef,
+                        period: state.period,
+                        dimension: state.dimension
+                    })
                 });
             } else {
                 res = await fetch('/api/city_compare/reports', {
